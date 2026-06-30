@@ -1,0 +1,142 @@
+# Kazakh suffix inventory for morphological analysis
+# Source: Common Kazakh morphological patterns
+# Human researcher can extend/correct this list
+
+# Vowel sets for harmony checking
+vowels:
+  front: [е, ө, ү, і, э]           # Front/soft vowels
+  back: [а, о, ұ, ы, у]            # Back/hard vowels
+
+# Derivational suffixes (word-forming)
+# Listed longest-first to ensure correct matching
+derivational:
+  # Agent/profession
+  - {suffix: шылық, type: abstract}   # -ship (from agent)
+  - {suffix: шілік, type: abstract}
+  - {suffix: шы, type: agent}
+  - {suffix: ші, type: agent}
+  
+  # Abstract nouns
+  - {suffix: лық, type: abstract}
+  - {suffix: лік, type: abstract}
+  - {suffix: дық, type: abstract}
+  - {suffix: дік, type: abstract}
+  - {suffix: тық, type: abstract}
+  - {suffix: тік, type: abstract}
+  
+  # Quality/state
+  - {suffix: сыз, type: privative}    # -less
+  - {suffix: сіз, type: privative}
+  - {suffix: лы, type: adjective}
+  - {suffix: лі, type: adjective}
+  - {suffix: ды, type: adjective}
+  - {suffix: ді, type: adjective}
+  - {suffix: ты, type: adjective}
+  - {suffix: ті, type: adjective}
+  
+  # Verb-forming
+  - {suffix: ла, type: verbalize}
+  - {suffix: ле, type: verbalize}
+  - {suffix: да, type: verbalize}
+  - {suffix: де, type: verbalize}
+  
+  # Diminutive
+  - {suffix: шық, type: diminutive}
+  - {suffix: шік, type: diminutive}
+
+# Inflectional suffixes (grammatical)
+inflectional:
+  # Plural
+  plural:
+    - лар
+    - лер
+    - дар
+    - дер
+    - тар
+    - тер
+  
+  # Case markers
+  case:
+    # Genitive
+    - {suffix: ның, case: GEN}
+    - {suffix: нің, case: GEN}
+    - {suffix: дың, case: GEN}
+    - {suffix: дің, case: GEN}
+    - {suffix: тың, case: GEN}
+    - {suffix: тің, case: GEN}
+    
+    # Dative
+    - {suffix: ға, case: DAT}
+    - {suffix: ге, case: DAT}
+    - {suffix: қа, case: DAT}
+    - {suffix: ке, case: DAT}
+    
+    # Accusative
+    - {suffix: ны, case: ACC}
+    - {suffix: ні, case: ACC}
+    - {suffix: ды, case: ACC}
+    - {suffix: ді, case: ACC}
+    - {suffix: ты, case: ACC}
+    - {suffix: ті, case: ACC}
+    
+    # Locative
+    - {suffix: да, case: LOC}
+    - {suffix: де, case: LOC}
+    - {suffix: та, case: LOC}
+    - {suffix: те, case: LOC}
+    
+    # Ablative
+    - {suffix: дан, case: ABL}
+    - {suffix: ден, case: ABL}
+    - {suffix: тан, case: ABL}
+    - {suffix: тен, case: ABL}
+    - {suffix: нан, case: ABL}
+    - {suffix: нен, case: ABL}
+    
+    # Instrumental
+    - {suffix: мен, case: INS}
+    - {suffix: бен, case: INS}
+    - {suffix: пен, case: INS}
+  
+  # Possessive
+  possessive:
+    - {suffix: ым, person: 1sg}
+    - {suffix: ім, person: 1sg}
+    - {suffix: м, person: 1sg}
+    - {suffix: ың, person: 2sg}
+    - {suffix: ің, person: 2sg}
+    - {suffix: ң, person: 2sg}
+    - {suffix: сы, person: 3sg}
+    - {suffix: сі, person: 3sg}
+    - {suffix: ы, person: 3sg}
+    - {suffix: і, person: 3sg}
+    - {suffix: мыз, person: 1pl}
+    - {suffix: міз, person: 1pl}
+    - {suffix: ыңыз, person: 2pl_formal}
+    - {suffix: іңіз, person: 2pl_formal}
+    
+  # Verbal inflection (common)
+  verbal:
+    # Past tense
+    - {suffix: ды, tense: PAST}
+    - {suffix: ді, tense: PAST}
+    - {suffix: ты, tense: PAST}
+    - {suffix: ті, tense: PAST}
+    
+    # Past participle
+    - {suffix: ған, tense: PAST_PART}
+    - {suffix: ген, tense: PAST_PART}
+    - {suffix: қан, tense: PAST_PART}
+    - {suffix: кен, tense: PAST_PART}
+    
+    # Present/habitual
+    - {suffix: ады, tense: PRES}
+    - {suffix: еді, tense: PRES}
+    
+    # Future
+    - {suffix: ар, tense: FUT}
+    - {suffix: ер, tense: FUT}
+    
+    # Infinitive
+    - {suffix: у, form: INF}
+    - {suffix: ю, form: INF}

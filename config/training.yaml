@@ -1,0 +1,49 @@
+# Training configuration for CEFR classification
+
+# Language settings
+lang: kaz                           # Default language (do not auto-load others)
+
+# Reproducibility
+seed: 42
+
+# Data splits
+test_size: 0.15
+dev_size: 0.15
+stratify_col: cefr
+lemma_disjoint: false               # Set true for strict evaluation
+
+# Training
+epochs: 20
+batch_size: 16
+learning_rate: 2.0e-5
+warmup_ratio: 0.1
+early_stopping_patience: 7          # Based on dev macro-F1
+weight_decay: 0.01
+dropout: 0.3
+
+# Transformer settings
+transformer_model: xlm-roberta-base
+freeze_transformer: false
+freeze_transformer_except_top_n: 2  # Only fine-tune top N transformer layers
+max_seq_length: 128
+
+# Morphology encoder
+char_embed_dim: 64
+char_num_filters: 128
+char_kernel_sizes: [2, 3, 4]
+morph_hidden_dim: 96
+morph_output_dim: 384
+fusion_output_dim: 256
+
+# Loss settings
+use_class_weights: true
+label_smoothing_sigma: 0.5          # Ordinal-aware Gaussian label smoothing
+
+# Fusion
+fusion_type: gated                  # "gated" or "concat"
+
+# Logging
+log_every_n_steps: 50
+eval_every_n_steps: 100
+save_best_model: true
+metric_for_best: macro_f1

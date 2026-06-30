@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# ML artifacts / data / outputs
+artifacts/
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+wandb/
+runs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+dataset/
+

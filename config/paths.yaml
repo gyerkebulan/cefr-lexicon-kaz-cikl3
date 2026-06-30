@@ -1,0 +1,27 @@
+# Paths configuration for CEFR classification
+# Default language: Kazakh (kaz)
+
+data:
+  raw_dir: dataset/raw
+  processed_dir: dataset/splits
+  
+  # Expected input files (user places these)
+  lexicon: dataset/processed/combined_lexicon.csv
+  context: dataset/processed/context_corpus.json
+  
+  # Pre-existing splits (already processed with features)
+  train: dataset/splits/train.csv
+  dev: dataset/splits/dev.csv
+  test: dataset/splits/test.csv
+
+config:
+  suffixes: config/kaz_suffixes.yaml
+  training: config/training.yaml
+
+results:
+  dir: results
+  metrics: results/metrics
+  predictions: results/predictions
+  figures: results/figures
+  models: results/models
+  run_index: results/run_index.csv

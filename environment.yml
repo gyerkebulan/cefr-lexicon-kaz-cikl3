@@ -1,0 +1,22 @@
+name: kazakh_cefr_env
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - python
+  - pip
+  - pytorch
+  - torchvision
+  - pandas
+  - numpy
+  - scikit-learn
+  - tqdm
+  - sentencepiece
+  - joblib
+  - pyyaml
+  - pip:
+      - transformers
+      - datasets
+      - pymorphy2
+      - pymorphy3

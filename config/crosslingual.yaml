@@ -1,0 +1,37 @@
+# Cross-lingual experiment configuration
+
+english_data:
+  efllex_url: "https://cental.uclouvain.be/cefrlex/efllex/efllex_all.tsv.zip"
+  unified_path: dataset/english_cefr/english_cefr_unified.csv
+  train: dataset/english_cefr/train.csv
+  dev: dataset/english_cefr/dev.csv
+  test: dataset/english_cefr/test.csv
+
+translations:
+  output: dataset/translations/kaz_eng_translations.csv
+  mt_model: Helsinki-NLP/opus-mt-kk-en
+
+embeddings:
+  output_dir: dataset/embeddings
+
+models:
+  mbert: bert-base-multilingual-cased
+  xlmr: xlm-roberta-base
+
+# C1: Cross-lingual transfer
+transfer:
+  few_shot_k_values: [10, 25, 50, 100]
+  epochs: 10
+  lr: 2.0e-5
+  few_shot_lr: 1.0e-5
+  batch_size: 32
+  dropout: 0.3
+  max_word_length: 32
+
+# C3: Calibration
+calibration:
+  methods: [ridge, svr, mlp]
+  ridge_alpha: 1.0
+  svr_C: 1.0
+  mlp_hidden: [256, 128]
+  mlp_max_iter: 500
