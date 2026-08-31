@@ -4,6 +4,7 @@ Context encoder using mBERT/XLM-R for CEFR classification.
 
 import logging
 import os
+import unicodedata
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -12,6 +13,11 @@ from transformers import AutoModel, AutoTokenizer
 
 logger = logging.getLogger("cefr")
 OFFLINE_FALLBACK_MODEL = "bert-base-multilingual-cased"
+TARGET_SPAN_FALLBACK_STATUSES = {"missing_fallback", "truncated_fallback"}
+
+
+def count_target_span_failures(statuses: List[str]) -> int:
+    return sum(status in TARGET_SPAN_FALLBACK_STATUSES for status in statuses)
 
 
 def _local_files_only() -> bool:
@@ -130,6 +136,12 @@ class ContextEncoder(nn.Module):
         Returns:
             context_emb: [batch, hidden_size]
         """
+        if target_mask is not None:
+            invalid_rows = target_mask.sum(dim=1) <= 0
+            if invalid_rows.any():
+                indices = invalid_rows.nonzero(as_tuple=False).flatten().tolist()
+                raise ValueError(f"Empty target mask for batch rows {indices}")
+
         outputs = self.transformer(
             input_ids=input_ids,
             attention_mask=attention_mask
@@ -147,7 +159,7 @@ class ContextEncoder(nn.Module):
             masked = hidden_states * target_mask
             sum_emb = masked.sum(dim=1)  # [batch, hidden]
             count = target_mask.sum(dim=1).clamp(min=1)  # [batch, 1]
-            return sum_emb / count
+            pooled = sum_emb / count
             
         elif self.pooling == "attention" and target_mask is not None:
             # Attention pooling over target tokens
@@ -162,13 +174,17 @@ class ContextEncoder(nn.Module):
             
             # Apply weights to hidden states and sum
             weighted_emb = hidden_states * attn_weights
-            return weighted_emb.sum(dim=1)  # [batch, hidden]
+            pooled = weighted_emb.sum(dim=1)  # [batch, hidden]
         
         else:
             # Fallback: mean pool over all tokens
             mask = attention_mask.unsqueeze(-1).float()
             masked = hidden_states * mask
-            return masked.sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+            pooled = masked.sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+
+        if not torch.isfinite(pooled).all():
+            raise FloatingPointError("Context pooling produced NaN or infinity")
+        return pooled
     
     @property
     def output_dim(self) -> int:
@@ -187,15 +203,15 @@ class ContextTokenizer:
         target_token: str = "[TGT]"
     ):
         self.tokenizer, self.model_name = _load_tokenizer_with_offline_fallback(model_name)
+        if not getattr(self.tokenizer, "is_fast", False):
+            raise ValueError("Offset-aware target detection requires a fast tokenizer")
         self.max_length = max_length
         self.target_token = target_token
-        
-        # Add target token if not in vocab
-        # Use get_vocab() for compatibility with both BERT and XLM-R tokenizers
-        vocab = self.tokenizer.get_vocab()
-        if target_token not in vocab:
-            self.tokenizer.add_special_tokens({'additional_special_tokens': [target_token]})
-            logger.info(f"Added {target_token} to tokenizer")
+        # ponytail: in-process counter; return statuses through batches if DataLoader workers are added.
+        self.target_span_failure_count = 0
+
+    def reset_stats(self) -> None:
+        self.target_span_failure_count = 0
     
     def __call__(
         self,
@@ -212,48 +228,83 @@ class ContextTokenizer:
         Returns:
             Dict with input_ids, attention_mask, target_mask
         """
-        # Mark targets in sentences
-        marked_sentences = []
-        for sent, target in zip(sentences, targets):
-            # Simple replacement (case-insensitive)
-            marked = sent.replace(target, f"{self.target_token} {target} {self.target_token}")
-            marked_sentences.append(marked)
-        
-        # Tokenize
+        if len(sentences) != len(targets):
+            raise ValueError("sentences and targets must have equal length")
+        texts, spans_by_row, statuses = [], [], []
+        for sentence, target in zip(sentences, targets):
+            text = unicodedata.normalize("NFC", str(sentence))
+            normalized_target = unicodedata.normalize("NFC", str(target)).strip()
+            if not normalized_target:
+                raise ValueError("Target must not be empty")
+            spans = self._find_spans(text, normalized_target)
+            if spans:
+                status = "repeated" if len(spans) > 1 else "found"
+            else:
+                text, spans, status = normalized_target, [(0, len(normalized_target))], "missing_fallback"
+            texts.append(text)
+            spans_by_row.append(spans)
+            statuses.append(status)
+
         encoded = self.tokenizer(
-            marked_sentences,
-            max_length=self.max_length,
-            padding=True,
-            truncation=True,
-            return_tensors="pt"
+            texts, max_length=self.max_length, padding="max_length", truncation=True,
+            return_offsets_mapping=True, return_tensors="pt",
         )
-        
-        # Create target mask
-        target_token_id = self.tokenizer.convert_tokens_to_ids(self.target_token)
-        
-        # Find positions between [TGT] markers
-        input_ids = encoded['input_ids']
-        batch_size, seq_len = input_ids.shape
-        target_mask = torch.zeros_like(input_ids)
-        
-        for i in range(batch_size):
-            in_target = False
-            for j in range(seq_len):
-                if input_ids[i, j] == target_token_id:
-                    in_target = not in_target
-                elif in_target:
-                    target_mask[i, j] = 1
+        offsets = encoded.pop("offset_mapping")
+        target_mask = torch.zeros_like(encoded["input_ids"])
+        for row, spans in enumerate(spans_by_row):
+            for column, (start, end) in enumerate(offsets[row].tolist()):
+                if end > start and any(start < span_end and end > span_start for span_start, span_end in spans):
+                    target_mask[row, column] = 1
+            if target_mask[row].sum() == 0:
+                fallback = self.tokenizer(
+                    str(targets[row]), max_length=self.max_length, padding="max_length",
+                    truncation=True, return_offsets_mapping=True, return_tensors="pt",
+                )
+                fallback_offsets = fallback.pop("offset_mapping")[0]
+                encoded["input_ids"][row] = fallback["input_ids"][0]
+                encoded["attention_mask"][row] = fallback["attention_mask"][0]
+                target_mask[row] = (
+                    (fallback_offsets[:, 1] > fallback_offsets[:, 0])
+                    & fallback["attention_mask"][0].bool()
+                ).long()
+                statuses[row] = "truncated_fallback"
+            if target_mask[row].sum() == 0:
+                raise ValueError(f"Target tokenization produced an empty mask for row {row}")
+
+        self.target_span_failure_count += count_target_span_failures(statuses)
         
         return {
-            'input_ids': input_ids,
+            'input_ids': encoded['input_ids'],
             'attention_mask': encoded['attention_mask'],
-            'target_mask': target_mask
+            'target_mask': target_mask,
+            'target_status': statuses,
+            'target_span_count': torch.tensor([len(spans) for spans in spans_by_row]),
         }
+
+    @staticmethod
+    def _find_spans(sentence: str, target: str) -> List[Tuple[int, int]]:
+        folded, origins = [], []
+        for index, character in enumerate(sentence):
+            expansion = character.casefold()
+            folded.extend(expansion)
+            origins.extend([index] * len(expansion))
+        needle = target.casefold()
+        haystack = "".join(folded)
+        spans, start = [], 0
+        while True:
+            found = haystack.find(needle, start)
+            if found < 0:
+                break
+            end = found + len(needle)
+            before = haystack[found - 1] if found else ""
+            after = haystack[end] if end < len(haystack) else ""
+            if not (before.isalnum() or before == "_") and not (after.isalnum() or after == "_"):
+                spans.append((origins[found], origins[end - 1] + 1))
+            start = found + max(len(needle), 1)
+        return spans
     
     def resize_embeddings(self, model: nn.Module) -> None:
-        """Resize model embeddings if tokens were added."""
-        if hasattr(model, 'transformer'):
-            model.transformer.resize_token_embeddings(len(self.tokenizer))
+        """Kept for call-site compatibility; offset marking adds no tokens."""
 
 
 class ContextOnlyCEFR(nn.Module):
