@@ -118,6 +118,64 @@ for seed in 42 123 456 789 2024; do
 done
 ```
 
+## Accuracy-and-robustness autoresearch
+
+The locked series in `config/autoresearch.yaml` separates dataset construction,
+candidate evaluation, and the one-shot final test.
+
+```bash
+# Rebuild the immutable leakage-grouped 70/15/15 series.
+python3 scripts/build_research_splits.py --config config/autoresearch.yaml
+
+# Candidate and ablation commands open train.csv and dev.csv only.
+python3 scripts/train_dual.py \
+  --research-config config/autoresearch.yaml \
+  --proposal-id PROPOSAL_ID --seed 42
+
+# Generate deterministic robustness inputs, run model inference on them, then score.
+python3 scripts/evaluate_robustness.py \
+  --research-config config/autoresearch.yaml \
+  --input dataset/research/ar-accrobust-20260724/dev.csv \
+  --output results/autoresearch/ar-accrobust-20260724/robustness-inputs.csv
+python3 scripts/train_dual.py \
+  --research-config config/autoresearch.yaml \
+  --proposal-id PROPOSAL_ID --seed 42 \
+  --robustness-input results/autoresearch/ar-accrobust-20260724/robustness-inputs.csv
+python3 scripts/evaluate_robustness.py \
+  --research-config config/autoresearch.yaml \
+  --predictions results/predictions/MODEL_robustness.csv \
+  --output ROBUSTNESS_METRICS.json
+
+# Fit one temperature only from five-fold, exactly-once OOF predictions for
+# every frozen training row.
+python3 scripts/calibrate_predictions.py \
+  --research-config config/autoresearch.yaml \
+  --proposal-id PROPOSAL_ID \
+  --oof-predictions OOF_PREDICTIONS.csv \
+  --output CALIBRATED_OOF_PREDICTIONS.csv
+
+# Only an accepted, five-seed champion manifest can consume the test once.
+python3 scripts/final_test.py \
+  --research-config config/autoresearch.yaml \
+  --champion-manifest CHAMPION_MANIFEST.json
+```
+
+Each research run records its proposal, revision, changed files, seed,
+configuration and protocol hashes, dev metrics, runtime, parameter count, peak
+VRAM, artifact paths and checksums, and outcome. Failed and interrupted runs
+remain separate immutable records. Test results are never a signal for another
+same-series tuning round.
+
+Target spans use NFC-normalized, case-insensitive tokenizer offsets. All
+occurrences are pooled when a target repeats. A missing or truncated target
+falls back explicitly to target-only encoding; an empty target mask or
+non-finite context representation is an error.
+
+Remote runs require verified encrypted-at-rest storage under
+`ESAI_RA_ZHANTORE`. Durable outputs are mirrored into the ignored
+`remote_mirror/` tree and checksum-verified with
+`scripts/mirror_gpu_artifacts.py`.
+
 ## Requirements
 
 - Python ≥ 3.10
