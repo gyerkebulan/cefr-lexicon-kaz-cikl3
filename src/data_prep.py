@@ -319,24 +319,37 @@ def dump_uncertain_predictions(
 # Convenience Functions
 # =============================================================================
 
-def load_splits(processed_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Load pre-existing train/dev/test splits."""
+def _normalize_split_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize legacy split column names without accessing another split."""
+    if 'cefr_level' in df.columns and 'cefr' not in df.columns:
+        df['cefr'] = df['cefr_level']
+    if 'word' in df.columns and 'lemma' not in df.columns:
+        df['lemma'] = df['word']
+    return df
+
+
+def load_train_dev(processed_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Load only train and dev; candidate processes must use this boundary."""
     processed_dir = Path(processed_dir)
-    
-    train = pd.read_csv(processed_dir / 'train.csv')
-    dev = pd.read_csv(processed_dir / 'dev.csv')
-    test = pd.read_csv(processed_dir / 'test.csv')
-    
-    # Normalize column names for compatibility
-    for df in [train, dev, test]:
-        # Handle cefr_level -> cefr
-        if 'cefr_level' in df.columns and 'cefr' not in df.columns:
-            df['cefr'] = df['cefr_level']
-        # Handle word -> lemma
-        if 'word' in df.columns and 'lemma' not in df.columns:
-            df['lemma'] = df['word']
-    
-    logger.info(f"Loaded splits: train={len(train)}, dev={len(dev)}, test={len(test)})")
+    train = _normalize_split_columns(pd.read_csv(processed_dir / 'train.csv'))
+    dev = _normalize_split_columns(pd.read_csv(processed_dir / 'dev.csv'))
+    logger.info(f"Loaded candidate splits: train={len(train)}, dev={len(dev)}")
+    return train, dev
+
+
+def load_test(processed_dir: Path) -> pd.DataFrame:
+    """Load the sealed test split. Only the final-test command may call this."""
+    processed_dir = Path(processed_dir)
+    test = _normalize_split_columns(pd.read_csv(processed_dir / 'test.csv'))
+    logger.info(f"Loaded sealed test split: test={len(test)}")
+    return test
+
+
+def load_splits(processed_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Legacy loader. Research candidate commands must use :func:`load_train_dev`."""
+    logger.warning("load_splits opens test data; do not use it in autoresearch candidate mode")
+    train, dev = load_train_dev(processed_dir)
+    test = load_test(processed_dir)
     return train, dev, test
 
 

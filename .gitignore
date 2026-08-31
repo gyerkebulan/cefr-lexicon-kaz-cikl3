@@ -21,6 +21,8 @@ artifacts/
 *.safetensors
 wandb/
 runs/
+results/
+remote_mirror/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -32,3 +34,12 @@ runs/
 
 dataset/
 
+# Local agent instructions and runtime state
+.agent/
+.claude/
+.codex/
+.gemini/
+AGENTS.md
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md

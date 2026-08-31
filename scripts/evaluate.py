@@ -24,7 +24,7 @@ from src.metrics import (
 from src.data_prep import dump_uncertain_predictions
 
 
-def load_predictions(model_name: str, results_dir: Path, split: str = "test") -> pd.DataFrame:
+def load_predictions(model_name: str, results_dir: Path, split: str = "dev") -> pd.DataFrame:
     """Load predictions CSV for a model."""
     pred_path = results_dir / "predictions" / f"{model_name}_{split}.csv"
     if not pred_path.exists():
@@ -32,7 +32,7 @@ def load_predictions(model_name: str, results_dir: Path, split: str = "test") ->
     return pd.read_csv(pred_path)
 
 
-def load_metrics(model_name: str, results_dir: Path, split: str = "test") -> dict:
+def load_metrics(model_name: str, results_dir: Path, split: str = "dev") -> dict:
     """Load metrics JSON for a model."""
     metrics_path = results_dir / "metrics" / f"{model_name}_{split}.json"
     if not metrics_path.exists():
