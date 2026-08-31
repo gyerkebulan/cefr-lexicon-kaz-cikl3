@@ -109,8 +109,8 @@ def coral_predict(ordinal_logits):
     probs = probs.clamp(min=0)
     probs = probs / probs.sum(dim=1, keepdim=True)
 
-    # Predictions: class with highest probability
-    predictions = probs.argmax(dim=1)
+    # CORAL rank prediction: number of thresholds crossed.
+    predictions = (ordinal_logits > 0).sum(dim=1)
 
     return predictions, probs
 
