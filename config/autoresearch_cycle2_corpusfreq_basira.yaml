@@ -1,0 +1,134 @@
+# Fresh data-resource series: old implicit surface map versus explicit surface+lemma maps.
+series:
+  id: ar-cycle2-corpusfreq-basira-20260823
+  experiment_id: ar-cycle2-corpusfreq-basira-20260823-e1
+  baseline_revision: f4101b65a11b58b8c8644bb643922dfc80ddaa73
+  proposal_id: pending-publication
+  protocol_lock_hash: 33b085211f15c488f06a5e2e2f674629969d3c3190577d7a5cb3844979ef461c
+  allowed_research_surface:
+  - src/features.py
+  - scripts/train_dual.py
+  research_surface_baseline_hashes:
+    src/features.py: e76e077632832d0e453e20236230b1726b06724de6e30c3cff64dfaea8f79b94
+    scripts/train_dual.py: 5e7fe2398cb1e8358d23d0783d448a5770f93a7ad0fc766a3024aad9896d2a79
+  protocol_baseline_changed_files:
+  - .gitignore
+  - README.md
+  - config/autoresearch.yaml
+  - config/autoresearch_cycle2_corpusfreq_basira.yaml
+  - config/autoresearch_cycle2_datafix_basira.yaml
+  - config/autoresearch_cycle2_datafix_uplift_basira.yaml
+  - config/autoresearch_cycle2_refinement.yaml
+  - config/autoresearch_cycle2_uplift.yaml
+  - config/autoresearch_cycle2_uplift_basira.yaml
+  - scripts/build_corpus_data.py
+  - scripts/build_derived_supervision.py
+  - scripts/build_research_splits.py
+  - scripts/calibrate_predictions.py
+  - scripts/evaluate.py
+  - scripts/evaluate_robustness.py
+  - scripts/final_test.py
+  - scripts/lock_champion.py
+  - scripts/mirror_gpu_artifacts.py
+  - scripts/reconstruct_corpus_features.py
+  - scripts/run_autoresearch.py
+  - scripts/train_baselines.py
+  - scripts/train_context.py
+  - scripts/train_dual.py
+  - src/data_prep.py
+  - src/metrics.py
+  - src/models/context_encoder.py
+  - src/research_protocol.py
+  fixed_file_hashes:
+    config/kaz_suffixes.yaml: 16b676193cb7c9c0c339e635250024dee9988e24d716af595886d24041dd09e3
+    environment.yml: 6ee3c2947fe7f9351ccd9ee27bb2d29378af4a7f6cd0129f9351f3f052ef2c6f
+    src/data_prep.py: 8134f05b6f6760dca9995f67f8a85f29f2d0e1bdcc358d6975a8613b76d3c39f
+    src/metrics.py: b64e4b7b5b4b5ed29393173240627b46ec899ab8ad3dee0f7950ffeba12a6c6f
+    src/models/context_encoder.py: c2fd739c2bdf04086196d738d81519685f10dd59cb286f8379241d4345474789
+    src/models/dual_encoder.py: 1f1b35f86185052d34116d258888d599a993a79d5cd23fdd3e15ed70132201da
+    src/models/fusion.py: da811bf519f21a029b83bbadea04ee55455195e61ba2dc573e6e6f1ed571faad
+    src/models/morph_encoder.py: c93bbf3f6f7d1413450a5409b783afba42e8605fc3fb2d5aff01c80ebeaaa9ba
+    src/models/coral_loss.py: 72f9edded08da28a64d13a1b77cc6e9777f13ab08724992df0c3489c083b56ad
+    src/research_protocol.py: 39f7fe9e201244086b6bfca05f7e3dab72720fe04517fed708b50eaeff21e02c
+    scripts/evaluate_robustness.py: 52b12a515e820e2bbe1d4b6e2c30d44005368f6e93b71d1b2f8e319b3ccd7e4f
+    scripts/run_autoresearch.py: 35fd4226e8a57bb5d50b20bc4175ea5ea6b5e2bd4b7ce48d039fca9d79cd031b
+    artifacts/frequencies/lemma_freqs.json: 9b22e09c4e5202be1305243cecbb74cf17f0b4fc3821c0eb148238ec43d318b4
+    artifacts/corpus-resources-v2-20260823/lemma_freqs.json: d52e1d0173d5efb433538ba6c0cf0fe81e74e8f82f581dee626c57fda0f95c18
+    artifacts/corpus-resources-v2-20260823/surface_freqs.json: bc54e06fca8ec746a567c7b6b5ee16a123f7f22d19255dd96896cbf7c60a0f76
+    results/autoresearch/ar-cycle2-datafix-uplift-basira-20260823/robustness-inputs.csv: e2148fea4e05fd669a585ff02b084819a2ad1be104e29e5a3f911bc1db595098
+  forbidden_during_series:
+  - config/autoresearch_cycle2_corpusfreq_basira.yaml
+  - dataset/research/ar-cycle2-corpusfreq-basira-20260823
+  - src/metrics.py
+  - scripts/build_research_splits.py
+  - scripts/final_test.py
+
+dataset:
+  source: dataset/processed/combined_lexicon.csv
+  context_cache: artifacts/context/lemma_sentences.json
+  output_dir: dataset/research/ar-cycle2-corpusfreq-basira-20260823
+  inherited_from: ar-cycle2-datafix-uplift-basira-20260823
+  normalization: NFC-casefold
+  near_duplicate_edit_distance: 1
+  ambiguous_context_policy: target_only_for_multi_pos_multi_cefr
+  grouping:
+  - normalized_lemma
+  - near_duplicate_lemma
+  - context_sentence_sha256
+  labels_keyed_by:
+  - normalized_lemma
+  - pos
+  frozen_hashes:
+    source_sha256: c36315dc22903d4e5cb4f0beb7a59cda9baf5bb50d32a673fb115f6229939d7a
+    context_cache_sha256: 7bca04c2fc2ab98d663ce2556ee1637779667325e6181eebd019ef533b99dfd6
+    preprocessing_sha256: 0e543cc9bc981fdd9e7813fbf5dea5d5e12c741648ab6adf4c683a842aefe26e
+    dataset_sha256: 71b030956605181f7492bb54725976a44943f5e193dfebd5c5980da94df40fe2
+    splits:
+      train: cfaaf876ea59ac66258f4e311634f82bbed126118aa289b1bae2e8528bc42d47
+      dev: 54c88ff99efbeeea7fef65c940e652c0c546626b40846d44c160b232bc738492
+
+evaluation:
+  primary: macro_f1
+  direction: maximize
+  calibration_folds: 5
+  screen_seeds: [42]
+  confirmation_seeds: [42, 123, 456, 789, 2024]
+  screening:
+    max_epochs: 20
+    patience: 7
+    gpu_minutes: 90
+    minimum_macro_f1_gain: 0.03559487451459766
+  confirmation:
+    minimum_mean_macro_f1_gain: 0.03559487451459766
+    paired_bootstrap_samples: 10000
+    confidence: 0.95
+    require_lower_bound_above: 0.0
+  guardrail_floors:
+    perturbation_macro_f1_regression: 0.01
+    supported_slice_or_class_f1_regression: 0.02
+    ordinal_mae_regression: 0.02
+    quadratic_weighted_kappa_regression: 0.01
+    expected_calibration_error_regression: 0.02
+    supported_slice_minimum_examples: 50
+  relative_macro_f1_target:
+    minimum: 0.1
+    preferred: 0.15
+    reference_baseline_macro_f1: 0.3559487451459766
+    minimum_reference_macro_f1: 0.39154361966057427
+
+budget_gpu_hours:
+  total: 6
+  baseline: 1.5
+  candidate_screening: 1.5
+  reserve: 3
+
+runtime:
+  host: basira-vm-ml
+  accelerator: NVIDIA_L4
+  environment: environment.yml
+  storage_mode: direct_restrictive_permissions
+  local_mirror: remote_mirror/ar-cycle2-corpusfreq-basira-20260823
+
+commands:
+  baseline: python3 scripts/train_dual.py --research-config config/autoresearch_cycle2_corpusfreq_basira.yaml --proposal-id BASELINE_PROPOSAL --seed 42 --variant dual_gated --tag corpusfreq_control_s42 --robustness-input results/autoresearch/ar-cycle2-datafix-uplift-basira-20260823/robustness-inputs.csv
+  candidate: python3 scripts/run_autoresearch.py --research-config config/autoresearch_cycle2_corpusfreq_basira.yaml --proposal-id CANDIDATE_PROPOSAL --hypothesis RESOURCE_HYPOTHESIS --baseline-manifest BASELINE_MANIFEST --baseline-robustness BASELINE_ROBUSTNESS --robustness-input results/autoresearch/ar-cycle2-datafix-uplift-basira-20260823/robustness-inputs.csv -- --variant dual_gated --tag corpusfreq_surface_lemma_s42 --surface-frequency-file artifacts/corpus-resources-v2-20260823/surface_freqs.json --lemma-frequency-file artifacts/corpus-resources-v2-20260823/lemma_freqs.json

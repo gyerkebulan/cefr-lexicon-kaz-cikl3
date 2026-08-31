@@ -842,6 +842,7 @@ def augment_with_features(
     suffix_inventory: Optional[SuffixInventory] = None,
     lang: str = "kaz",
     lemma_freq_file: Optional[Path] = None,
+    surface_freq_file: Optional[Path] = None,
     refresh_frequency_features: bool = True,
 ) -> pd.DataFrame:
     """
@@ -853,6 +854,7 @@ def augment_with_features(
         suffix_inventory: SuffixInventory instance (created if None)
         lang: Language code for suffix loading
         lemma_freq_file: Optional explicit lemma-frequency JSON path
+        surface_freq_file: Optional explicit surface-form frequency JSON path
         refresh_frequency_features: If True, overwrite existing frequency columns
         
     Returns:
@@ -878,6 +880,16 @@ def augment_with_features(
             f"Lemma frequency coverage: {covered}/{len(df)} "
             f"({100.0 * covered / max(len(df), 1):.1f}%)"
         )
+    surface_freq_lookup = (
+        load_lemma_frequency_map(surface_freq_file) if surface_freq_file else {}
+    )
+    if surface_freq_lookup:
+        form_series = df.get("target", df.get("form", df["lemma"])).astype(str).str.lower()
+        covered = int(form_series.isin(surface_freq_lookup).sum())
+        logger.info(
+            f"Surface frequency coverage: {covered}/{len(df)} "
+            f"({100.0 * covered / max(len(df), 1):.1f}%)"
+        )
     suffix_productivity = build_suffix_productivity_stats(suffix_inventory, freq_lookup)
 
     # Load paradigm stats (aggregated lemma frequencies + form diversity)
@@ -891,7 +903,9 @@ def augment_with_features(
         freq = float(row.get('freq', 0) or 0)
         lemma_freq = freq_lookup.get(lemma, float(row.get('lemma_freq_raw', row.get('freq', 0)) or 0))
         form = str(row.get('target') or row.get('form') or lemma).lower()
-        form_freq = float(row.get('form_freq', row.get('freq', 0)) or 0)
+        form_freq = surface_freq_lookup.get(
+            form, float(row.get('form_freq', row.get('freq', 0)) or 0)
+        )
 
         features = extract_all_features(
             lemma=lemma,
