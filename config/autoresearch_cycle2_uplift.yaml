@@ -1,0 +1,228 @@
+# Cycle 2 uplift series for basira-vm-ml NVIDIA L4; the earlier series remains unchanged.
+series:
+  id: ar-cycle2-uplift-20260821
+  experiment_id: ar-cycle2-uplift-20260821-b0
+  baseline_revision: f4101b65a11b58b8c8644bb643922dfc80ddaa73
+  proposal_id: codex-proposal-46c049d876bd9484
+  allowed_research_surface:
+  - config/training.yaml
+  - src/models/coral_loss.py
+  - src/models/dual_encoder.py
+  - src/models/fusion.py
+  - src/models/morph_encoder.py
+  - scripts/train_dual.py
+  research_surface_baseline_hashes:
+    config/training.yaml: b10d8a2646beee3408cb4401d184b36386cc3d6f3a5ca420853fd3d447b2a78e
+    src/models/coral_loss.py: 72f9edded08da28a64d13a1b77cc6e9777f13ab08724992df0c3489c083b56ad
+    src/models/dual_encoder.py: 1f1b35f86185052d34116d258888d599a993a79d5cd23fdd3e15ed70132201da
+    src/models/fusion.py: da811bf519f21a029b83bbadea04ee55455195e61ba2dc573e6e6f1ed571faad
+    src/models/morph_encoder.py: c93bbf3f6f7d1413450a5409b783afba42e8605fc3fb2d5aff01c80ebeaaa9ba
+    scripts/train_dual.py: 1de1c5ad8e25fc9f791c22d0675ce05022c699d3b388bf7a2252707d84fa6cfd
+  protocol_baseline_changed_files:
+  - .gitignore
+  - README.md
+  - config/autoresearch.yaml
+  - scripts/build_derived_supervision.py
+  - scripts/build_research_splits.py
+  - scripts/calibrate_predictions.py
+  - scripts/evaluate.py
+  - scripts/evaluate_robustness.py
+  - scripts/final_test.py
+  - scripts/lock_champion.py
+  - scripts/mirror_gpu_artifacts.py
+  - scripts/run_autoresearch.py
+  - scripts/train_baselines.py
+  - scripts/train_context.py
+  - scripts/train_dual.py
+  - src/data_prep.py
+  - src/metrics.py
+  - src/models/context_encoder.py
+  - src/research_protocol.py
+  - config/autoresearch_cycle2_refinement.yaml
+  - scripts/reconstruct_corpus_features.py
+  - config/autoresearch_cycle2_uplift.yaml
+  fixed_file_hashes:
+    .gitignore: 2127ef9a95c1dd7fc07be3c97f6a19c06cdbe9af9ba016cd78109a2e5d567792
+    README.md: c1a84be16090c15b7b0941028b2ce2c9510f381a55bf720f9ecc20d4a7cb1c12
+    config/kaz_suffixes.yaml: 16b676193cb7c9c0c339e635250024dee9988e24d716af595886d24041dd09e3
+    environment.yml: 6ee3c2947fe7f9351ccd9ee27bb2d29378af4a7f6cd0129f9351f3f052ef2c6f
+    scripts/build_derived_supervision.py: d9167075263819c7a4e3737131b29d6745a46e4cf5b301b3019ccca777370ae9
+    scripts/build_research_splits.py: 7d2b1ac1a7e6db19675f41f5c2183c7fb2c102f7823710a5c49ab71d327b63d7
+    scripts/calibrate_predictions.py: 52ca7a8e29f299bfae681eb4335bebcd47f3cf0492bc4dec8980a1a8757a3e62
+    scripts/evaluate.py: 01856927348390607836306efd7dbac26354d56c22cf96921d68084bb40a0305
+    scripts/evaluate_robustness.py: 4d1f3957e8112d44a751bcd646865f0c0b9903250f5bb59743f2f0f12acc86ed
+    scripts/final_test.py: ddab73c5416664d69285bd9b9f1c8070392dbb491291fd198b32807769e23004
+    scripts/lock_champion.py: a5873118035e4fc79ac33b8f0bdd65b2790377031f240a2cbeabfe1796ca09d2
+    scripts/mirror_gpu_artifacts.py: 5487304562319b6971d0886b38ccf5767d817758a27039045726074e113c1f66
+    scripts/run_autoresearch.py: 35fd4226e8a57bb5d50b20bc4175ea5ea6b5e2bd4b7ce48d039fca9d79cd031b
+    scripts/train_baselines.py: 8c2f163c30c5ee15fc87e43c2430cb5dc99b04c137a03ecef0539971125fe00d
+    scripts/train_context.py: e5c47817c1faafd5a64ef3b38f3579c059be61e1b955f5063d6817f1c5fe58fc
+    src/data_prep.py: 8134f05b6f6760dca9995f67f8a85f29f2d0e1bdcc358d6975a8613b76d3c39f
+    src/metrics.py: b64e4b7b5b4b5ed29393173240627b46ec899ab8ad3dee0f7950ffeba12a6c6f
+    src/models/context_encoder.py: c2fd739c2bdf04086196d738d81519685f10dd59cb286f8379241d4345474789
+    src/research_protocol.py: 39f7fe9e201244086b6bfca05f7e3dab72720fe04517fed708b50eaeff21e02c
+  forbidden_during_series:
+  - config/autoresearch_cycle2_uplift.yaml
+  - dataset/research/ar-cycle2-uplift-20260821
+  - src/metrics.py
+  - scripts/build_research_splits.py
+  - scripts/final_test.py
+  protocol_lock_hash: ae608b6d912cc63d8d878aebb6cc965d19f343da5c2047935c1ff371aa8e3b43
+dataset:
+  source: dataset/processed/combined_lexicon.csv
+  context_cache: artifacts/context/lemma_sentences.json
+  legacy_frequency_splits: dataset/splits
+  output_dir: dataset/research/ar-cycle2-uplift-20260821
+  proportions:
+    train: 0.7
+    dev: 0.15
+    test: 0.15
+  seed: 42
+  normalization: NFC-casefold
+  near_duplicate_edit_distance: 1
+  grouping:
+  - normalized_lemma
+  - near_duplicate_lemma
+  - context_sentence_sha256
+  labels_keyed_by:
+  - normalized_lemma
+  - pos
+  frozen_hashes:
+    source_sha256: c36315dc22903d4e5cb4f0beb7a59cda9baf5bb50d32a673fb115f6229939d7a
+    context_cache_sha256: 7bca04c2fc2ab98d663ce2556ee1637779667325e6181eebd019ef533b99dfd6
+    preprocessing_sha256: 8de33e96cb2f0991c096132ca0a97215475c3d25ae783390dc39d85bfefdca96
+    dataset_sha256: f3d3a083e01cc075b0be0b83be7229b9b5a4dedd0ddb05834e0ed4ccd8d5f2ac
+    splits:
+      train: 18df3e60ae60a30c20b024272f3eeedbd7533ddaaae0819c89b4a74ed7b2829d
+      dev: afb12c966a00103c7451aa9cf1c809a5763580df2e2bd1e5f2695aff036f69cd
+      test: bb2d8be9560329f81a652e747b42dee698588c2e639ee119317231c911fa5d39
+evaluation:
+  primary: macro_f1
+  direction: maximize
+  calibration_folds: 5
+  secondary:
+  - accuracy
+  - per_class_precision_recall_f1
+  - confusion_matrix
+  - ordinal_mae
+  - quadratic_weighted_kappa
+  - far_error_rate
+  - negative_log_likelihood
+  - brier_score
+  - expected_calibration_error
+  - entropy
+  - abstention_coverage
+  - parameter_count
+  - training_time
+  - inference_latency
+  - peak_vram
+  screen_seeds:
+  - 42
+  confirmation_seeds:
+  - 42
+  - 123
+  - 456
+  - 789
+  - 2024
+  screening:
+    max_epochs: 20
+    patience: 7
+    gpu_minutes: 90
+    minimum_macro_f1_gain: 0.03546416859089791
+  confirmation:
+    minimum_mean_macro_f1_gain: 0.03546416859089791
+    paired_bootstrap_samples: 10000
+    confidence: 0.95
+    require_lower_bound_above: 0.0
+  tie_break:
+    macro_f1_tolerance: 0.002
+    prefer: simpler_then_cheaper
+  guardrail_floors:
+    perturbation_macro_f1_regression: 0.01
+    supported_slice_or_class_f1_regression: 0.02
+    ordinal_mae_regression: 0.02
+    quadratic_weighted_kappa_regression: 0.01
+    expected_calibration_error_regression: 0.02
+    supported_slice_minimum_examples: 50
+  abstention_thresholds:
+  - 0.5
+  - 0.6
+  - 0.7
+  - 0.8
+  - 0.9
+  robustness:
+    slices:
+    - cefr
+    - pos
+    - frequency
+    - lemma_length
+    - morphology
+    - context_availability
+    - oov
+    perturbations:
+    - unicode_normalization
+    - case
+    - punctuation_whitespace
+    - controlled_character_noise
+    - target_repetition
+    - target_truncation
+    - context_removal
+    - context_distraction
+    - weak_inflected_surface_forms
+  relative_macro_f1_target:
+    minimum: 0.1
+    preferred: 0.15
+    reference_baseline_macro_f1: 0.3546416859089791
+    minimum_reference_macro_f1: 0.390105854499877
+budget_gpu_hours:
+  total: 48
+  protocol_and_five_seed_baselines: 6
+  candidate_screening: 24
+  five_seed_confirmations: 12
+  finalization: 4
+  reserve: 2
+runtime:
+  host: basira-vm-ml
+  accelerator: NVIDIA_L4
+  environment: environment.yml
+  encrypted_remote_root_required: ESAI_RA_ZHANTORE
+  local_mirror: remote_mirror/ar-cycle2-uplift-20260821
+queue:
+- engineering_validity
+- diagnostic_ablations
+- objectives
+- training_system
+- architecture
+- robustness_training
+- derived_supervision
+- finalization
+derived_supervision:
+  source: external_unlabeled_train_only
+  required_teacher_seed_agreement: 5
+  minimum_probability: 0.9
+  maximum_relative_to_gold_train: 1.0
+  balance_by_predicted_class: true
+  require_gold_only_ablation: true
+commands:
+  build_splits: python3 scripts/build_research_splits.py --config config/autoresearch_cycle2_uplift.yaml
+  screen: python3 scripts/run_autoresearch.py --research-config config/autoresearch_cycle2_uplift.yaml
+    --proposal-id PROPOSAL --hypothesis HYPOTHESIS --baseline-manifest BASELINE_MANIFEST
+    --baseline-robustness BASELINE_ROBUSTNESS --robustness-input ROBUSTNESS_INPUT
+    MODEL_ARGS
+  confirmation_seed: python3 scripts/train_dual.py --research-config config/autoresearch_cycle2_uplift.yaml
+    --proposal-id PROPOSAL --seed SEED MODEL_ARGS
+  champion_lock: python3 scripts/lock_champion.py --research-config config/autoresearch_cycle2_uplift.yaml
+    --baseline-manifests BASELINE_5 --candidate-manifests CANDIDATE_5 --baseline-robustness
+    BASELINE_ROBUSTNESS --candidate-robustness CANDIDATE_ROBUSTNESS --calibration-manifest
+    CALIBRATION_MANIFEST --review-event REVIEW_A --review-event REVIEW_B --rebuttal-event
+    REBUTTAL --decision-event DECISION --user-approved --output CHAMPION
+  robustness_generate: python3 scripts/evaluate_robustness.py --research-config config/autoresearch_cycle2_uplift.yaml
+    --input dataset/research/ar-cycle2-uplift-20260821/dev.csv --output results/autoresearch/ar-cycle2-uplift-20260821/robustness-inputs.csv
+  robustness_infer: python3 scripts/train_dual.py --research-config config/autoresearch_cycle2_uplift.yaml
+    --proposal-id PROPOSAL --seed SEED --robustness-input results/autoresearch/ar-cycle2-uplift-20260821/robustness-inputs.csv
+  robustness_score: python3 scripts/evaluate_robustness.py --research-config config/autoresearch_cycle2_uplift.yaml
+    --predictions PREDICTIONS --output REPORT
+  calibration: python3 scripts/calibrate_predictions.py --research-config config/autoresearch_cycle2_uplift.yaml
+    --proposal-id PROPOSAL --oof-predictions OOF_PREDICTIONS --output CALIBRATED_PREDICTIONS
+  final_test: python3 scripts/final_test.py --research-config config/autoresearch_cycle2_uplift.yaml
+    --champion-manifest CHAMPION

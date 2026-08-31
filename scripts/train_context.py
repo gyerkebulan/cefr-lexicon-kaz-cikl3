@@ -14,6 +14,7 @@ Usage:
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -30,12 +31,16 @@ from src.utils import (
     load_config, load_paths, setup_logging, set_seed, get_device,
     CEFR_LABELS, CEFR_TO_INT,
 )
-from src.data_prep import load_splits, print_label_distribution
+from src.data_prep import load_train_dev, print_label_distribution
 from src.metrics import (
     compute_metrics, save_metrics, save_predictions,
     update_run_index, print_metrics_summary,
 )
 from src.models.context_encoder import ContextOnlyCEFR, ContextTokenizer
+from src.research_protocol import (
+    build_run_manifest, load_protocol, require_gpu_budget, verify_dataset_manifest,
+    write_json,
+)
 
 # Reuse helpers from train_dual
 from scripts.train_dual import (
@@ -142,8 +147,9 @@ def evaluate(model, loader, device):
         all_labels.extend([CEFR_LABELS[l] for l in labels.tolist()])
         all_probs.extend(probs)
 
-    metrics = compute_metrics(all_labels, all_preds)
-    return metrics, all_preds, np.array(all_probs)
+    probabilities = np.array(all_probs)
+    metrics = compute_metrics(all_labels, all_preds, probabilities=probabilities)
+    return metrics, all_preds, probabilities
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -159,7 +165,10 @@ def main():
                         help="Unfreeze only top N transformer layers")
     parser.add_argument("--data-dir", type=Path, default=None)
     parser.add_argument("--variant", default="context_only_xlmr", help="Model variant name")
+    parser.add_argument("--research-config", type=Path, default=None)
+    parser.add_argument("--proposal-id", type=str, default=None)
     args = parser.parse_args()
+    started_at = time.perf_counter()
 
     logger = setup_logging()
     paths = load_paths()
@@ -167,6 +176,14 @@ def main():
     seed = args.seed or int(config.get("seed", 42))
     set_seed(seed)
     device = get_device()
+    protocol = protocol_hash = None
+    if args.research_config:
+        protocol, protocol_hash = load_protocol(args.research_config)
+        require_gpu_budget(
+            PROJECT_ROOT, protocol=protocol, protocol_hash=protocol_hash
+        )
+        if not args.proposal_id:
+            raise ValueError("--proposal-id is required with --research-config")
 
     transformer_model = args.transformer or config.get("transformer_model", "xlm-roberta-base")
     freeze_top_n = args.freeze_top_n if args.freeze_top_n is not None else config.get("freeze_transformer_except_top_n", 2)
@@ -174,6 +191,11 @@ def main():
     batch_size = config.get("batch_size", 16)
     epochs = args.epochs or config.get("epochs", 20)
     patience = config.get("early_stopping_patience", 7)
+    if protocol:
+        screen = protocol["evaluation"]["screening"]
+        if epochs > screen["max_epochs"]:
+            raise ValueError("Candidate epochs exceed the locked screening ceiling")
+        patience = min(patience, screen["patience"])
     transformer_lr = config.get("learning_rate", 2e-5)
     head_lr = transformer_lr * 25  # 5e-4
 
@@ -181,15 +203,23 @@ def main():
     logger.info(f"Training {model_name} (transformer={transformer_model}) on {device}")
 
     # ── Data ──────────────────────────────────────────────────────────────
-    processed_dir = args.data_dir or Path(paths["data"]["processed_dir"])
-    train_df, dev_df, test_df = load_splits(processed_dir)
+    processed_dir = (
+        args.data_dir
+        or (PROJECT_ROOT / protocol["dataset"]["output_dir"] if protocol else None)
+        or Path(paths["data"]["processed_dir"])
+    )
+    train_df, dev_df = load_train_dev(processed_dir)
+    if protocol:
+        verify_dataset_manifest(
+            processed_dir, protocol_hash=protocol_hash, splits=("train", "dev")
+        )
 
     if "sentence" not in train_df.columns:
         logger.warning("No 'sentence' column. Building context cache from external corpus.")
         corpus_dir = Path(paths["data"]["raw_dir"]) / "monolingual"
         context_cache = PROJECT_ROOT / "artifacts" / "context" / "lemma_sentences.json"
-        train_df, dev_df, test_df = attach_context_columns(
-            train_df, dev_df, test_df,
+        train_df, dev_df = attach_context_columns(
+            train_df, dev_df,
             corpus_dir=corpus_dir, cache_path=context_cache, logger=logger,
         )
 
@@ -211,11 +241,9 @@ def main():
 
     train_ds = make_dataset(train_df)
     dev_ds = make_dataset(dev_df)
-    test_ds = make_dataset(test_df)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     dev_loader = DataLoader(dev_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
     class_weights = compute_class_weights(train_df, device)
 
@@ -230,6 +258,8 @@ def main():
     model.encoder._freeze_except_top_n(freeze_top_n)
     tokenizer.resize_embeddings(model.encoder)
     model = model.to(device)
+    if device == "cuda":
+        torch.cuda.reset_peak_memory_stats()
 
     # Discriminative LR: transformer lower, head higher
     optimizer = torch.optim.AdamW([
@@ -250,6 +280,7 @@ def main():
     best_dev_f1 = 0
     patience_counter = 0
 
+    training_started = time.perf_counter()
     for epoch in range(epochs):
         train_loss = train_epoch(
             model, train_loader, optimizer, scheduler, device,
@@ -274,43 +305,78 @@ def main():
                 break
 
     # ── Evaluate best ─────────────────────────────────────────────────────
+    training_seconds = time.perf_counter() - training_started
     model.load_state_dict(torch.load(model_dir / "best_model.pt", map_location=device))
+    inference_started = time.perf_counter()
+    tokenizer.reset_stats()
     dev_metrics, dev_preds, dev_probs = evaluate(model, dev_loader, device)
-    test_metrics, test_preds, test_probs = evaluate(model, test_loader, device)
+    dev_metrics["training_seconds"] = training_seconds
+    dev_metrics["inference_latency_ms_per_example"] = (
+        1000 * (time.perf_counter() - inference_started) / len(dev_df)
+    )
+    dev_metrics.update({
+        "invalid_prediction_count": 0,
+        "target_span_failure_count": tokenizer.target_span_failure_count,
+        "nan_count": 0,
+    })
 
     print_metrics_summary(
         model_name=model_name,
-        train_size=len(train_df), dev_size=len(dev_df), test_size=len(test_df),
-        dev_metrics=dev_metrics, test_metrics=test_metrics,
+        train_size=len(train_df), dev_size=len(dev_df),
+        dev_metrics=dev_metrics,
         output_dir=Path(paths["results"]["dir"]),
     )
 
     # ── Save outputs ──────────────────────────────────────────────────────
     results_dir = Path(paths["results"]["dir"])
-    save_metrics(
-        test_metrics, f"{model_name}_test", results_dir / "metrics",
+    metrics_path = save_metrics(
+        {**dev_metrics, "split": "dev"}, f"{model_name}_dev", results_dir / "metrics",
         extra_info={
             "seed": seed, "transformer_model": transformer_model,
             "focal_gamma": args.focal_gamma, "freeze_top_n": freeze_top_n,
         },
     )
 
-    for split_name, df, preds, probs in [
-        ("dev", dev_df, dev_preds, dev_probs),
-        ("test", test_df, test_preds, test_probs),
-    ]:
-        df_out = df.copy()
-        df_out["pred_cefr"] = preds
-        df_out["gold_cefr"] = df_out["cefr"]
-        for i, label in enumerate(CEFR_LABELS):
-            df_out[f"prob_{label}"] = probs[:, i]
-        save_predictions(df_out, model_name, results_dir / "predictions", split=split_name)
+    dev_output = dev_df.copy()
+    dev_output["pred_cefr"] = dev_preds
+    dev_output["gold_cefr"] = dev_output["cefr"]
+    for i, label in enumerate(CEFR_LABELS):
+        dev_output[f"prob_{label}"] = dev_probs[:, i]
+    predictions_path = save_predictions(
+        dev_output, model_name, results_dir / "predictions", split="dev"
+    )
 
     update_run_index(
         model_name=model_name, config="training.yaml",
-        dev_metrics=dev_metrics, test_metrics=test_metrics,
+        dev_metrics=dev_metrics,
         index_path=Path(paths["results"]["run_index"]),
     )
+    if protocol:
+        checkpoint_path = model_dir / "best_model.pt"
+        manifest = build_run_manifest(
+            root=PROJECT_ROOT,
+            series_id=protocol["series"]["id"],
+            proposal_id=args.proposal_id,
+            protocol_hash=protocol_hash,
+            seed=seed,
+            configuration={
+                "variant": args.variant, "transformer_model": transformer_model,
+                "freeze_top_n": freeze_top_n, "epochs": epochs,
+                "focal_gamma": args.focal_gamma,
+            },
+            command=[sys.executable, *sys.argv],
+            metrics=dev_metrics,
+            runtime_seconds=time.perf_counter() - started_at,
+            parameter_count=sum(parameter.numel() for parameter in model.parameters()),
+            peak_vram_bytes=torch.cuda.max_memory_allocated() if device == "cuda" else 0,
+            artifacts=[checkpoint_path, metrics_path, predictions_path],
+            outcome="diagnostic_complete",
+        )
+        run_dir = (
+            results_dir / "autoresearch" / protocol["series"]["id"]
+            / args.proposal_id / f"seed-{seed}"
+        )
+        write_json(run_dir / "run-manifest.json", manifest, exclusive=True)
 
     return 0
 

@@ -10,18 +10,23 @@ Usage:
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.utils import load_config, load_paths, setup_logging, set_seed
-from src.data_prep import load_splits, print_label_distribution
+from src.utils import CEFR_LABELS, load_config, load_paths, setup_logging, set_seed
+from src.data_prep import load_train_dev, print_label_distribution
 from src.features import SuffixInventory, augment_with_features, print_feature_stats
 from src.models.baselines import get_baseline_model, prepare_features
 from src.metrics import (
     compute_metrics, compute_confusion_matrix,
     save_metrics, save_predictions, update_run_index,
     print_metrics_summary, save_confusion_matrix_figure
+)
+from src.research_protocol import (
+    build_run_manifest, load_protocol, verify_dataset_manifest, write_json,
 )
 
 
@@ -39,20 +44,36 @@ def main():
         default=None,
         help="Path to processed data directory"
     )
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--research-config", type=Path, default=None)
+    parser.add_argument("--proposal-id", type=str, default=None)
     args = parser.parse_args()
-    
+    started_at = time.perf_counter()
+
     # Setup
     logger = setup_logging()
     paths = load_paths()
     config = load_config("training")
-    set_seed(config.get("seed", 42))
-    
-    model_name = args.variant
+    seed = args.seed if args.seed is not None else int(config.get("seed", 42))
+    set_seed(seed)
+    protocol = protocol_hash = None
+    if args.research_config:
+        protocol, protocol_hash = load_protocol(args.research_config)
+        if not args.proposal_id:
+            raise ValueError("--proposal-id is required with --research-config")
+
+    model_name = f"{args.variant}_s{seed}"
     logger.info(f"Training baseline: {model_name}")
-    
+
     # Load data
-    data_dir = args.data_dir or Path(paths["data"]["processed_dir"])
-    train, dev, test = load_splits(data_dir)
+    data_dir = (
+        args.data_dir
+        or (PROJECT_ROOT / protocol["dataset"]["output_dir"] if protocol else None)
+        or Path(paths["data"]["processed_dir"])
+    )
+    train, dev = load_train_dev(data_dir)
+    if protocol:
+        verify_dataset_manifest(data_dir, protocol_hash=protocol_hash, splits=("train", "dev"))
     
     print_label_distribution(train, "Train")
     
@@ -61,11 +82,13 @@ def main():
     suffix_inv = SuffixInventory(config.get("lang", "kaz"))
     train = augment_with_features(train, suffix_inventory=suffix_inv)
     dev = augment_with_features(dev, suffix_inventory=suffix_inv)
-    test = augment_with_features(test, suffix_inventory=suffix_inv)
     
     # Prepare data - use ALL available features, not just the expected ones
-    meta_cols = {'lemma', 'pos', 'cefr', 'cefr_level', 'key'}
-    available_features = [c for c in train.columns if c not in meta_cols]
+    available_features = [
+        column for column in train.columns
+        if column not in {"source_row_id", "group_id"}
+        and train[column].dtype.kind in "biufc"
+    ]
 
     logger.info(f"Using all {len(available_features)} available features")
     logger.info(f"Features: {available_features}")
@@ -77,41 +100,53 @@ def main():
     X_dev = dev[available_features].values.astype('float32')
     y_dev = dev['cefr'].values if 'cefr' in dev.columns else dev['cefr_level'].values
 
-    X_test = test[available_features].values.astype('float32')
-    y_test = test['cefr'].values if 'cefr' in test.columns else test['cefr_level'].values
-
     # Handle NaN
     import numpy as np
     X_train = np.nan_to_num(X_train, nan=0.0)
     X_dev = np.nan_to_num(X_dev, nan=0.0)
-    X_test = np.nan_to_num(X_test, nan=0.0)
 
     logger.info(f"Feature matrix: {X_train.shape}")
 
     # Train model
-    model = get_baseline_model(model_name)
+    model = get_baseline_model(args.variant)
     logger.info(f"Training {model.name}...")
 
-    if model_name == "freq_only":
+    training_started = time.perf_counter()
+    if args.variant == "freq_only":
         model.fit(X_train, y_train, feature_cols=available_features)
     else:
         model.fit(X_train, y_train)
+    training_seconds = time.perf_counter() - training_started
     
     # Evaluate
+    inference_started = time.perf_counter()
     dev_preds = model.predict(X_dev)
-    test_preds = model.predict(X_test)
-    
-    dev_metrics = compute_metrics(y_dev.tolist(), dev_preds.tolist())
-    test_metrics = compute_metrics(y_test.tolist(), test_preds.tolist())
+    dev_probs = model.predict_proba(X_dev)
+    if dev_probs is None:
+        priors = train["cefr"].value_counts(normalize=True).reindex(CEFR_LABELS, fill_value=0)
+        dev_probs = np.tile(priors.to_numpy(), (len(dev), 1))
+    elif hasattr(model.model, "classes_"):
+        order = [list(model.model.classes_).index(label) for label in CEFR_LABELS]
+        dev_probs = dev_probs[:, order]
+    dev_metrics = compute_metrics(
+        y_dev.tolist(), dev_preds.tolist(), probabilities=dev_probs
+    )
+    dev_metrics["inference_latency_ms_per_example"] = (
+        1000 * (time.perf_counter() - inference_started) / len(dev)
+    )
+    dev_metrics.update({
+        "training_seconds": training_seconds,
+        "invalid_prediction_count": 0,
+        "target_span_failure_count": 0,
+        "nan_count": 0,
+    })
     
     # Print summary
     print_metrics_summary(
         model_name=model_name,
         train_size=len(train),
         dev_size=len(dev),
-        test_size=len(test),
         dev_metrics=dev_metrics,
-        test_metrics=test_metrics,
         output_dir=Path(paths["results"]["dir"])
     )
     
@@ -119,43 +154,55 @@ def main():
     results_dir = Path(paths["results"]["dir"])
     
     # Metrics JSON
-    save_metrics(
+    metrics_path = save_metrics(
         metrics={**dev_metrics, "split": "dev"},
         model_name=f"{model_name}_dev",
         output_dir=results_dir / "metrics"
     )
-    save_metrics(
-        metrics={**test_metrics, "split": "test"},
-        model_name=f"{model_name}_test",
-        output_dir=results_dir / "metrics"
-    )
-    
-    # Predictions CSV
-    test['pred_cefr'] = test_preds
-    test['gold_cefr'] = test['cefr']
+    dev['pred_cefr'] = dev_preds
+    dev['gold_cefr'] = dev['cefr']
     
     # Add probability columns if available
-    if model.predict_proba(X_test) is not None:
-        probs = model.predict_proba(X_test)
-        from src.utils import CEFR_LABELS
-        for i, label in enumerate(CEFR_LABELS):
-            if i < probs.shape[1]:
-                test[f'prob_{label}'] = probs[:, i]
+    for index, label in enumerate(CEFR_LABELS):
+        dev[f'prob_{label}'] = dev_probs[:, index]
     
-    save_predictions(test, model_name, results_dir / "predictions", split="test")
+    predictions_path = save_predictions(
+        dev, model_name, results_dir / "predictions", split="dev"
+    )
     
     # Confusion matrix
-    cm = compute_confusion_matrix(y_test.tolist(), test_preds.tolist())
-    save_confusion_matrix_figure(cm, model_name, results_dir / "figures")
+    cm = compute_confusion_matrix(y_dev.tolist(), dev_preds.tolist())
+    figure_path = save_confusion_matrix_figure(cm, model_name, results_dir / "figures")
     
     # Update run index
     update_run_index(
         model_name=model_name,
         config="training.yaml",
         dev_metrics=dev_metrics,
-        test_metrics=test_metrics,
         index_path=Path(paths["results"]["run_index"])
     )
+    if protocol:
+        artifacts = [metrics_path, predictions_path] + ([figure_path] if figure_path else [])
+        manifest = build_run_manifest(
+            root=PROJECT_ROOT,
+            series_id=protocol["series"]["id"],
+            proposal_id=args.proposal_id,
+            protocol_hash=protocol_hash,
+            seed=seed,
+            configuration={"variant": args.variant, "data_dir": str(data_dir)},
+            command=[sys.executable, *sys.argv],
+            metrics=dev_metrics,
+            runtime_seconds=time.perf_counter() - started_at,
+            parameter_count=0,
+            peak_vram_bytes=0,
+            artifacts=artifacts,
+            outcome="diagnostic_complete",
+        )
+        run_dir = (
+            results_dir / "autoresearch" / protocol["series"]["id"]
+            / args.proposal_id / f"seed-{seed}"
+        )
+        write_json(run_dir / "run-manifest.json", manifest, exclusive=True)
     
     # Print feature importance for tree-based models
     if hasattr(model, 'get_feature_importance'):

@@ -8,10 +8,13 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import math
+import os
 import re
 import sys
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -20,7 +23,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Sampler
+from torch.utils.data import DataLoader, Sampler, WeightedRandomSampler
 from transformers import get_linear_schedule_with_warmup
 from tqdm import tqdm
 import numpy as np
@@ -30,7 +33,7 @@ from src.utils import (
     load_config, load_paths, setup_logging, set_seed, get_device,
     CEFR_LABELS, CEFR_TO_INT
 )
-from src.data_prep import load_splits, print_label_distribution
+from src.data_prep import load_test, load_train_dev, print_label_distribution
 from src.features import SuffixInventory, augment_with_features, get_feature_columns
 from src.metrics import (
     compute_metrics, save_metrics, save_predictions,
@@ -40,6 +43,10 @@ from src.models.dual_encoder import DualEncoderCEFR, collate_dual_encoder
 from src.models.morph_encoder import CharVocab
 from src.models.context_encoder import ContextTokenizer
 from src.models.coral_loss import coral_loss, coral_predict, CombinedOrdinalLoss
+from src.research_protocol import (
+    build_run_manifest, load_protocol, require_gpu_budget,
+    research_surface_changes, sha256_file, verify_dataset_manifest, write_json,
+)
 
 MORPH_FEATURE_PREFIXES = (
     "morph_",
@@ -73,7 +80,7 @@ class DualDataset(torch.utils.data.Dataset):
     def __init__(self, df, tokenizer, char_vocab, feature_cols, max_char_len=30):
         self.sentences = df['sentence'].tolist() if 'sentence' in df.columns else df['lemma'].tolist()
         self.targets = df['target'].tolist() if 'target' in df.columns else df['lemma'].tolist()
-        self.lemmas = df['lemma'].tolist()
+        self.lemmas = df['lemma'].astype(str).tolist()
         self.labels = [CEFR_TO_INT[l] for l in df['cefr'].tolist()]
 
         # Extract features
@@ -104,7 +111,7 @@ class DualDataset(torch.utils.data.Dataset):
         }
 
 
-def compute_class_weights(train_df, device):
+def compute_class_weights(train_df, device, mid_class_multiplier=1.0):
     """Compute inverse-frequency class weights."""
     counts = train_df['cefr'].value_counts()
     class_counts = torch.tensor(
@@ -112,7 +119,38 @@ def compute_class_weights(train_df, device):
         dtype=torch.float32
     )
     weights = (1.0 / class_counts) * class_counts.sum() / len(CEFR_LABELS)
+    weights[[CEFR_TO_INT["A2"], CEFR_TO_INT["B1"]]] *= mid_class_multiplier
     return weights.to(device)
+
+
+def mask_conflicting_train_contexts(frame):
+    """Use target-only text where one train lemma has conflicting POS/CEFR rows."""
+    required = {"normalized_lemma", "pos", "cefr", "sentence", "target",
+                "context_available", "context_hash", "source_row_id"}
+    if missing := required - set(frame.columns):
+        raise ValueError(f"Context masking requires columns: {sorted(missing)}")
+    counts = frame.groupby("normalized_lemma").agg(
+        pos_count=("pos", "nunique"), cefr_count=("cefr", "nunique")
+    )
+    lemmas = sorted(counts.index[(counts.pos_count > 1) & (counts.cefr_count > 1)])
+    mask = frame["normalized_lemma"].isin(lemmas)
+    output = frame.copy()
+    untouched = output.loc[~mask, ["sentence", "context_available", "context_hash"]].copy()
+    output.loc[mask, "sentence"] = output.loc[mask, "target"]
+    output.loc[mask, "context_available"] = False
+    output.loc[mask, "context_hash"] = ""
+    if not output.loc[~mask, untouched.columns].equals(untouched):
+        raise RuntimeError("Context masking changed an unselected train row")
+    if not output.loc[mask, "sentence"].equals(output.loc[mask, "target"]):
+        raise RuntimeError("Context masking did not produce target-only text")
+    source_ids = sorted(output.loc[mask, "source_row_id"].astype(str))
+    return output, {
+        "masked_train_lemma_count": len(lemmas),
+        "masked_train_row_count": int(mask.sum()),
+        "masked_train_source_ids_sha256": hashlib.sha256(
+            "\n".join(source_ids).encode("utf-8")
+        ).hexdigest(),
+    }
 
 
 class ClassBalancedBatchSampler(Sampler):
@@ -156,6 +194,80 @@ class ClassBalancedBatchSampler(Sampler):
                 batch.extend(sampled.tolist())
             rng.shuffle(batch)
             yield batch
+
+
+def target_only_sampling_weights(frame, target_only_weight):
+    """Return deterministic sampler weights and aggregate context statistics."""
+    if not math.isfinite(target_only_weight) or target_only_weight <= 0:
+        raise ValueError("target-only sample weight must be finite and positive")
+    if "context_available" not in frame:
+        raise ValueError("target-only sampling requires context_available")
+    available = frame["context_available"]
+    if available.isna().any() or not available.map(
+        lambda value: isinstance(value, (bool, np.bool_))
+    ).all():
+        raise ValueError("context_available must contain only booleans")
+    target_only = ~available.to_numpy(dtype=bool)
+    weights = torch.tensor(
+        np.where(target_only, target_only_weight, 1.0), dtype=torch.double
+    )
+    assert len(weights) == len(frame) and torch.isfinite(weights).all()
+    return weights, {
+        "target_only_sample_weight": float(target_only_weight),
+        "target_only_train_rate": float(target_only.mean()),
+        "target_only_expected_sample_rate": float(weights[target_only].sum() / weights.sum()),
+    }
+
+
+def drop_train_contexts(frame, rate, seed):
+    """Replace a fixed uniform subset of train contexts with target-only text."""
+    if not math.isfinite(rate) or not 0 <= rate <= 1:
+        raise ValueError("train context dropout rate must be finite and within [0, 1]")
+    required = {
+        "sentence", "target", "context_available", "context_hash", "source_row_id"
+    }
+    if missing := required - set(frame.columns):
+        raise ValueError(f"Context dropout requires columns: {sorted(missing)}")
+    if frame["source_row_id"].duplicated().any():
+        raise ValueError("Context dropout requires unique source_row_id values")
+    available = frame["context_available"]
+    if available.isna().any() or not available.map(
+        lambda value: isinstance(value, (bool, np.bool_))
+    ).all():
+        raise ValueError("context_available must contain only booleans")
+    eligible = frame.index[available].tolist()
+    selected_count = int(len(eligible) * rate)
+    ranked = sorted(
+        eligible,
+        key=lambda index: hashlib.sha256(
+            f"{seed}:{frame.at[index, 'source_row_id']}".encode("utf-8")
+        ).digest(),
+    )
+    selected = ranked[:selected_count]
+    mask = frame.index.isin(selected)
+    output = frame.copy()
+    output.loc[mask, "sentence"] = output.loc[mask, "target"]
+    output.loc[mask, "context_available"] = False
+    output.loc[mask, "context_hash"] = ""
+    changed_columns = ["sentence", "context_available", "context_hash"]
+    if not output.loc[~mask, changed_columns].equals(frame.loc[~mask, changed_columns]):
+        raise RuntimeError("Context dropout changed an unselected row")
+    if not output.drop(columns=changed_columns).equals(frame.drop(columns=changed_columns)):
+        raise RuntimeError("Context dropout changed non-context columns")
+    if not output.loc[mask, "sentence"].equals(output.loc[mask, "target"]):
+        raise RuntimeError("Context dropout did not produce target-only text")
+    selected_ids = sorted(output.loc[mask, "source_row_id"].astype(str))
+    assert len(selected_ids) == selected_count and int(mask.sum()) == selected_count
+    return output, {
+        "train_context_dropout_rate": float(rate),
+        "context_present_before_dropout": len(eligible),
+        "dropped_train_context_count": selected_count,
+        "dropped_train_source_ids_sha256": hashlib.sha256(
+            "\n".join(selected_ids).encode("utf-8")
+        ).hexdigest(),
+        "target_only_train_rate_before_dropout": float((~available).mean()),
+        "target_only_train_rate_after_dropout": float((~output["context_available"]).mean()),
+    }
 
 
 def ordinal_soft_labels(label, num_classes=5, sigma=0.5):
@@ -295,7 +407,14 @@ def build_lemma_context_map(lemmas, corpus_dir: Path, cache_path: Path, logger):
 
     if cache_path.exists():
         context_map = json.loads(cache_path.read_text(encoding="utf-8"))
-        context_map = {str(k).lower(): str(v) for k, v in context_map.items()}
+        context_map = {
+            str(key).lower(): (
+                next((item for item in value if isinstance(item, str) and item.strip()), "")
+                if isinstance(value, list) else str(value)
+            )
+            for key, value in context_map.items()
+        }
+        context_map = {key: value for key, value in context_map.items() if value.strip()}
 
     remaining = set(lemma_list) - set(context_map)
     if not remaining:
@@ -337,14 +456,15 @@ def build_lemma_context_map(lemmas, corpus_dir: Path, cache_path: Path, logger):
     return context_map
 
 
-def attach_context_columns(train_df, dev_df, test_df, corpus_dir: Path, cache_path: Path, logger):
+def attach_context_columns(*dataframes, corpus_dir: Path, cache_path: Path, logger):
     all_lemmas = pd.concat(
-        [train_df["lemma"], dev_df["lemma"], test_df["lemma"]], ignore_index=True
+        [df["lemma"] for df in dataframes], ignore_index=True
     ).astype(str)
     context_map = build_lemma_context_map(all_lemmas.tolist(), corpus_dir, cache_path, logger)
 
     enriched = []
-    for split_name, df in [("train", train_df), ("dev", dev_df), ("test", test_df)]:
+    split_names = ("train", "dev", "test")
+    for split_name, df in zip(split_names, dataframes):
         df = df.copy()
         df["target"] = df["lemma"].astype(str)
         df["sentence"] = df["lemma"].astype(str).map(
@@ -359,9 +479,89 @@ def attach_context_columns(train_df, dev_df, test_df, corpus_dir: Path, cache_pa
     return tuple(enriched)
 
 
+def expand_eval_contexts(frame, context_path: Path, max_contexts: int):
+    """Expand context-bearing rows and retain one group per original example."""
+    if max_contexts < 2:
+        raise ValueError("Multi-context evaluation requires at least two contexts")
+    required = {
+        "source_row_id", "normalized_lemma", "sentence", "target",
+        "context_available", "cefr",
+    }
+    if missing := required - set(frame.columns):
+        raise ValueError(f"Multi-context evaluation requires columns: {sorted(missing)}")
+    raw_contexts = json.loads(Path(context_path).read_text(encoding="utf-8"))
+    context_map = {
+        str(key).strip().lower(): (
+            [value] if isinstance(value, str) else value
+        )
+        for key, value in raw_contexts.items()
+    }
+    rows = []
+    expanded_groups = 0
+    for row in frame.to_dict("records"):
+        candidates = [str(row["sentence"])]
+        if bool(row["context_available"]):
+            candidates.extend(context_map.get(str(row["normalized_lemma"]).lower(), []))
+        candidates = list(dict.fromkeys(
+            value.strip() for value in candidates
+            if isinstance(value, str) and value.strip()
+        ))[:max_contexts]
+        if not candidates:
+            raise ValueError(f"Empty context group for source_row_id={row['source_row_id']}")
+        expanded_groups += len(candidates) > 1
+        for rank, sentence in enumerate(candidates):
+            member = dict(row)
+            member.update({
+                "sentence": sentence,
+                "eval_group_id": str(row["source_row_id"]),
+                "eval_context_rank": rank,
+            })
+            rows.append(member)
+    expanded = pd.DataFrame(rows)
+    grouped = expanded.groupby("eval_group_id", sort=False)
+    if len(grouped) != len(frame) or grouped["cefr"].nunique().max() != 1:
+        raise RuntimeError("Multi-context expansion changed row coverage or labels")
+    return expanded, {
+        "eval_context_file": str(context_path),
+        "eval_context_file_sha256": sha256_file(context_path),
+        "max_eval_contexts": int(max_contexts),
+        "original_eval_rows": int(len(frame)),
+        "expanded_eval_rows": int(len(expanded)),
+        "multi_context_groups": int(expanded_groups),
+        "mean_contexts_per_row": float(len(expanded) / len(frame)),
+    }
+
+
+def aggregate_group_probabilities(labels, probabilities, group_ids):
+    """Mean probabilities in first-seen group order with label checks."""
+    if len(labels) != len(probabilities) or len(labels) != len(group_ids):
+        raise ValueError("Labels, probabilities and group IDs must have equal length")
+    ordered, group_labels, group_probs = [], {}, {}
+    for label, probability, group_id in zip(labels, probabilities, group_ids):
+        key = str(group_id)
+        if key not in group_probs:
+            ordered.append(key)
+            group_labels[key] = int(label)
+            group_probs[key] = []
+        elif group_labels[key] != int(label):
+            raise ValueError(f"Conflicting labels in evaluation group {key}")
+        group_probs[key].append(probability)
+    return (
+        [group_labels[key] for key in ordered],
+        np.stack([np.mean(group_probs[key], axis=0) for key in ordered]),
+    )
+
+
+def weighted_mean_cross_entropy(logits, labels, class_weights=None):
+    losses = F.cross_entropy(logits, labels, reduction="none")
+    if class_weights is not None:
+        losses = losses * class_weights[labels]
+    return losses.mean()
+
+
 def train_epoch(model, loader, optimizer, scheduler, device,
                 class_weights=None, label_smoothing_sigma=0.0,
-                use_ordinal=False, ordinal_weight=0.5,
+                use_ordinal=False, use_ordinal_auxiliary=False, ordinal_weight=0.5,
                 loss_type="ce", focal_gamma=2.0, emd_weight=0.0, r_drop_alpha=0.0):
     """Train for one epoch."""
     model.train()
@@ -378,55 +578,61 @@ def train_epoch(model, loader, optimizer, scheduler, device,
         morph_features = batch['morph_features'].to(device)
         labels = batch['labels'].to(device)
 
-        if use_ordinal:
+        def compute_cls_loss(current_logits):
+            if loss_type == "focal":
+                base_loss = focal_loss(
+                    current_logits,
+                    labels,
+                    gamma=focal_gamma,
+                    class_weights=class_weights,
+                )
+            elif loss_type == "emd":
+                base_loss = earth_mover_distance_loss(
+                    current_logits,
+                    labels,
+                    num_classes=num_classes,
+                    class_weights=class_weights,
+                )
+            elif label_smoothing_sigma > 0:
+                # Ordinal-aware Gaussian label smoothing
+                soft_targets = torch.stack([
+                    ordinal_soft_labels(l.item(), num_classes, label_smoothing_sigma)
+                    for l in labels
+                ]).to(device)
+                # Incorporate class weights into soft targets
+                if class_weights is not None:
+                    per_sample_weight = class_weights[labels]
+                    sample_loss = -(F.log_softmax(current_logits, dim=1) * soft_targets).sum(dim=1)
+                    base_loss = (sample_loss * per_sample_weight).mean()
+                else:
+                    base_loss = soft_cross_entropy(current_logits, soft_targets)
+            else:
+                base_loss = weighted_mean_cross_entropy(
+                    current_logits, labels, class_weights
+                )
+
+            if emd_weight > 0 and loss_type != "emd":
+                base_loss = base_loss + emd_weight * earth_mover_distance_loss(
+                    current_logits,
+                    labels,
+                    num_classes=num_classes,
+                    class_weights=class_weights,
+                )
+            return base_loss
+
+        if use_ordinal or use_ordinal_auxiliary:
             logits, ordinal_logits = model(
                 input_ids, attention_mask, target_mask, char_ids, morph_features,
                 return_ordinal=True
             )
-            ce_loss = F.cross_entropy(logits, labels, weight=class_weights)
+            ce_loss = (
+                F.cross_entropy(logits, labels, weight=class_weights)
+                if use_ordinal
+                else compute_cls_loss(logits)
+            )
             ord_loss = coral_loss(ordinal_logits, labels, num_classes=num_classes)
             loss = ce_loss + ordinal_weight * ord_loss
         else:
-            def compute_cls_loss(current_logits):
-                if loss_type == "focal":
-                    base_loss = focal_loss(
-                        current_logits,
-                        labels,
-                        gamma=focal_gamma,
-                        class_weights=class_weights,
-                    )
-                elif loss_type == "emd":
-                    base_loss = earth_mover_distance_loss(
-                        current_logits,
-                        labels,
-                        num_classes=num_classes,
-                        class_weights=class_weights,
-                    )
-                elif label_smoothing_sigma > 0:
-                    # Ordinal-aware Gaussian label smoothing
-                    soft_targets = torch.stack([
-                        ordinal_soft_labels(l.item(), num_classes, label_smoothing_sigma)
-                        for l in labels
-                    ]).to(device)
-                    # Incorporate class weights into soft targets
-                    if class_weights is not None:
-                        per_sample_weight = class_weights[labels]
-                        sample_loss = -(F.log_softmax(current_logits, dim=1) * soft_targets).sum(dim=1)
-                        base_loss = (sample_loss * per_sample_weight).mean()
-                    else:
-                        base_loss = soft_cross_entropy(current_logits, soft_targets)
-                else:
-                    base_loss = F.cross_entropy(current_logits, labels, weight=class_weights)
-
-                if emd_weight > 0 and loss_type != "emd":
-                    base_loss = base_loss + emd_weight * earth_mover_distance_loss(
-                        current_logits,
-                        labels,
-                        num_classes=num_classes,
-                        class_weights=class_weights,
-                    )
-                return base_loss
-
             if r_drop_alpha > 0:
                 logits_1 = model(input_ids, attention_mask, target_mask, char_ids, morph_features)
                 logits_2 = model(input_ids, attention_mask, target_mask, char_ids, morph_features)
@@ -448,12 +654,15 @@ def train_epoch(model, loader, optimizer, scheduler, device,
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, use_ordinal=False):
+def evaluate(model, loader, device, use_ordinal=False, temperature=1.0, group_ids=None):
     """Evaluate model."""
+    if temperature <= 0:
+        raise ValueError("Temperature must be positive")
     model.eval()
     all_preds = []
-    all_labels = []
+    all_label_ids = []
     all_probs = []
+    all_pred_ids = []
 
     for batch in loader:
         input_ids = batch['input_ids'].to(device)
@@ -469,26 +678,46 @@ def evaluate(model, loader, device, use_ordinal=False):
                 return_ordinal=True
             )
             preds_tensor, probs_tensor = coral_predict(ordinal_logits)
-            preds = preds_tensor.cpu().tolist()
             probs = probs_tensor.cpu().numpy()
         else:
             logits = model(input_ids, attention_mask, target_mask, char_ids, morph_features)
             probs = torch.softmax(logits, dim=1).cpu().numpy()
-            preds = logits.argmax(dim=1).cpu().tolist()
+        if temperature != 1.0:
+            probs = np.power(np.clip(probs, 1e-12, 1.0), 1.0 / temperature)
+            probs = probs / probs.sum(axis=1, keepdims=True)
+        preds = (
+            preds_tensor.cpu().tolist()
+            if use_ordinal else probs.argmax(axis=1).tolist()
+        )
 
-        all_preds.extend([CEFR_LABELS[p] for p in preds])
-        all_labels.extend([CEFR_LABELS[l] for l in labels.tolist()])
+        all_pred_ids.extend(preds)
+        all_label_ids.extend(labels.tolist())
         all_probs.extend(probs)
 
-    metrics = compute_metrics(all_labels, all_preds)
-    return metrics, all_preds, np.array(all_probs)
+    probabilities = np.array(all_probs)
+    if group_ids is not None:
+        if use_ordinal:
+            raise ValueError("Grouped evaluation is supported only for CE-head inference")
+        all_label_ids, probabilities = aggregate_group_probabilities(
+            all_label_ids, probabilities, group_ids
+        )
+        all_pred_ids = probabilities.argmax(axis=1).tolist()
+    all_preds = [CEFR_LABELS[p] for p in all_pred_ids]
+    all_labels = [CEFR_LABELS[l] for l in all_label_ids]
+    metrics = compute_metrics(all_labels, all_preds, probabilities=probabilities)
+    return metrics, all_preds, probabilities
 
 
 def main():
     parser = argparse.ArgumentParser(description="Train dual encoder model")
     parser.add_argument("--variant", default="dual_gated", choices=["dual_gated", "dual_concat", "dual_cross_attn", "dual_residual_gated"])
     parser.add_argument("--pooling", default="mean", choices=["mean", "cls", "first", "attention"], help="Context encoder pooling strategy")
-    parser.add_argument("--ordinal", action="store_true", help="Use CORAL ordinal regression loss")
+    ordinal_mode = parser.add_mutually_exclusive_group()
+    ordinal_mode.add_argument("--ordinal", action="store_true", help="Use CORAL loss and inference")
+    ordinal_mode.add_argument(
+        "--ordinal-auxiliary", action="store_true",
+        help="Add CORAL loss while retaining CE-head inference",
+    )
     parser.add_argument("--ordinal-weight", type=float, default=0.5,
                         help="Weight for ordinal loss component (default: 0.5)")
     parser.add_argument("--freeze-bert", action="store_true",
@@ -501,8 +730,20 @@ def main():
                         help="Override number of training epochs")
     parser.add_argument("--batch-size", type=int, default=None,
                         help="Override batch size")
+    parser.add_argument("--label-smoothing-sigma", type=float, default=None,
+                        help="Override Gaussian label smoothing sigma")
     parser.add_argument("--data-dir", type=Path, default=None,
                         help="Optional split directory override containing train/dev/test CSVs")
+    parser.add_argument("--robustness-input", type=Path, default=None,
+                        help="Generated dev-only robustness CSV to score with this run")
+    parser.add_argument("--lemma-frequency-file", type=Path, default=None,
+                        help="Explicit lemma-frequency JSON")
+    parser.add_argument("--surface-frequency-file", type=Path, default=None,
+                        help="Explicit surface-form frequency JSON")
+    parser.add_argument("--eval-context-file", type=Path, default=None,
+                        help="Multi-context JSON used only for grouped dev evaluation")
+    parser.add_argument("--max-eval-contexts", type=int, default=10,
+                        help="Maximum contexts averaged per dev row")
     parser.add_argument("--checkpoint-path", type=Path, default=None,
                         help="Optional checkpoint to load before training/evaluation")
     parser.add_argument("--eval-only", action="store_true",
@@ -517,6 +758,8 @@ def main():
                         help="Include precomputed emb_* columns in the MorphMLP input")
     parser.add_argument("--transformer-model", type=str, default=None,
                         help="Optional transformer model name or local path override")
+    parser.add_argument("--transformer-learning-rate", type=float, default=None,
+                        help="Override only the transformer optimizer-group learning rate")
     parser.add_argument("--loss-type", default="ce", choices=["ce", "focal", "emd"],
                         help="Primary classification loss when not using --ordinal")
     parser.add_argument("--focal-gamma", type=float, default=2.0,
@@ -527,9 +770,31 @@ def main():
                         help="R-Drop symmetric KL coefficient (0 disables R-Drop)")
     parser.add_argument("--class-balanced-batches", action="store_true",
                         help="Use a class-balanced batch sampler for train DataLoader")
+    parser.add_argument("--mid-class-weight-multiplier", type=float, default=1.0,
+                        help="Extra loss-weight multiplier applied only to A2 and B1")
+    parser.add_argument("--target-only-sample-weight", type=float, default=1.0,
+                        help="Relative sampling weight for train rows without full context")
+    parser.add_argument("--train-context-dropout-rate", type=float, default=0.0,
+                        help="Fixed fraction of context-present train rows made target-only")
+    parser.add_argument("--mask-conflicting-train-contexts", action="store_true",
+                        help="Use target-only train text for multi-POS lemmas with conflicting CEFR")
     parser.add_argument("--seed", type=int, default=None,
                         help="Optional random seed override")
+    parser.add_argument("--research-config", type=Path, default=None,
+                        help="Locked autoresearch protocol; enables structured manifests")
+    parser.add_argument("--proposal-id", type=str, default=None,
+                        help="Immutable proposal identifier for this candidate")
+    parser.add_argument("--final-test-manifest", type=Path, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--temperature", type=float, default=1.0,
+                        help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if (args.lemma_frequency_file is None) != (args.surface_frequency_file is None):
+        parser.error("--lemma-frequency-file and --surface-frequency-file must be supplied together")
+    for frequency_file in (args.lemma_frequency_file, args.surface_frequency_file):
+        if frequency_file is not None and not frequency_file.is_file():
+            parser.error(f"frequency resource does not exist: {frequency_file}")
+    started_at = time.perf_counter()
 
     # Setup
     logger = setup_logging()
@@ -554,6 +819,8 @@ def main():
         model_name += f"_s{effective_seed}"
     if args.ordinal:
         model_name += "_ordinal"
+    elif args.ordinal_auxiliary:
+        model_name += "_ordaux"
     if args.freeze_bert:
         model_name += "_frozen"
     if args.loss_type == "focal":
@@ -566,19 +833,59 @@ def main():
         model_name += f"_rdrop{str(args.r_drop_alpha).replace('.', 'p')}"
     if args.class_balanced_batches:
         model_name += "_cbatch"
+    if args.mid_class_weight_multiplier != 1.0:
+        model_name += f"_midw{str(args.mid_class_weight_multiplier).replace('.', 'p')}"
+    if args.eval_context_file:
+        model_name += f"_ctxavg{args.max_eval_contexts}"
+    if args.target_only_sample_weight != 1.0:
+        model_name += f"_tow{str(args.target_only_sample_weight).replace('.', 'p')}"
+    if args.train_context_dropout_rate > 0:
+        model_name += f"_ctxdrop{str(args.train_context_dropout_rate).replace('.', 'p')}"
     use_ordinal = args.ordinal
+    use_ordinal_auxiliary = args.ordinal_auxiliary
 
     # Config values
     dropout = config.get("dropout", 0.3)
     freeze_top_n = args.unfreeze_layers or config.get("freeze_transformer_except_top_n", 2)
     use_class_weights = config.get("use_class_weights", True)
-    label_smoothing_sigma = config.get("label_smoothing_sigma", 0.5)
+    label_smoothing_sigma = (
+        args.label_smoothing_sigma if args.label_smoothing_sigma is not None
+        else config.get("label_smoothing_sigma", 0.5)
+    )
+    if not math.isfinite(label_smoothing_sigma) or label_smoothing_sigma < 0:
+        raise ValueError("label smoothing sigma must be finite and non-negative")
     transformer_model = args.transformer_model or config.get("transformer_model", "xlm-roberta-base")
+    configured_transformer_lr = float(config.get("learning_rate", 2e-5))
+    transformer_lr = (
+        args.transformer_learning_rate
+        if args.transformer_learning_rate is not None
+        else configured_transformer_lr
+    )
+    if not math.isfinite(transformer_lr) or transformer_lr <= 0:
+        raise ValueError("transformer learning rate must be finite and positive")
+    if not math.isfinite(args.target_only_sample_weight) or args.target_only_sample_weight <= 0:
+        raise ValueError("target-only sample weight must be finite and positive")
+    if args.class_balanced_batches and args.target_only_sample_weight != 1.0:
+        raise ValueError("target-only weighting cannot be combined with class-balanced batches")
+    if not math.isfinite(args.mid_class_weight_multiplier) or args.mid_class_weight_multiplier <= 0:
+        raise ValueError("mid-class weight multiplier must be finite and positive")
+    if args.class_balanced_batches and args.mid_class_weight_multiplier != 1.0:
+        raise ValueError("mid-class weighting cannot be combined with class-balanced batches")
+    if (
+        not math.isfinite(args.train_context_dropout_rate)
+        or not 0 <= args.train_context_dropout_rate <= 1
+    ):
+        raise ValueError("train context dropout rate must be finite and within [0, 1]")
+    if args.train_context_dropout_rate > 0 and (
+        args.target_only_sample_weight != 1.0 or args.mask_conflicting_train_contexts
+    ):
+        raise ValueError("train context dropout cannot be combined with another context treatment")
+    head_lr = configured_transformer_lr * 25
     if args.loss_type in {"focal", "emd"} and not use_ordinal and label_smoothing_sigma > 0:
         logger.info(f"Disabling label smoothing because {args.loss_type} loss is enabled")
         label_smoothing_sigma = 0.0
-    if args.r_drop_alpha > 0 and use_ordinal:
-        logger.info("Disabling R-Drop because ordinal mode is enabled")
+    if args.r_drop_alpha > 0 and (use_ordinal or use_ordinal_auxiliary):
+        logger.info("Disabling R-Drop because an ordinal training mode is enabled")
         args.r_drop_alpha = 0.0
     if args.class_balanced_batches and use_class_weights:
         logger.info("Disabling class weights because class-balanced batches are enabled")
@@ -586,17 +893,124 @@ def main():
 
     logger.info(
         f"Training {model_name} (fusion={fusion_type}, ordinal={use_ordinal}, "
+        f"ordinal_auxiliary={use_ordinal_auxiliary}, "
         f"model={transformer_model}, freeze_top_n={freeze_top_n}, "
+        f"transformer_lr={transformer_lr}, head_lr={head_lr}, "
         f"dropout={dropout}, class_weights={use_class_weights}, loss={args.loss_type}, "
         f"emd_weight={args.emd_weight}, r_drop_alpha={args.r_drop_alpha}, "
         f"class_balanced_batches={args.class_balanced_batches}, "
+        f"mid_class_weight_multiplier={args.mid_class_weight_multiplier}, "
+        f"target_only_sample_weight={args.target_only_sample_weight}, "
+        f"train_context_dropout_rate={args.train_context_dropout_rate}, "
         f"label_smooth_sigma={label_smoothing_sigma}, seed={effective_seed}) on {device}"
     )
 
-    # Load data
-    processed_dir = args.data_dir if args.data_dir is not None else Path(paths["data"]["processed_dir"])
+    research_protocol = protocol_hash = None
+    if args.research_config is not None:
+        research_protocol, protocol_hash = load_protocol(args.research_config)
+        if not args.proposal_id:
+            raise ValueError("--proposal-id is required with --research-config")
+        screen = research_protocol["evaluation"]["screening"]
+        if (args.epochs or config.get("epochs", 20)) > screen["max_epochs"]:
+            raise ValueError("Candidate epochs exceed the locked screening ceiling")
+        require_gpu_budget(
+            PROJECT_ROOT, protocol=research_protocol, protocol_hash=protocol_hash
+        )
+    final_test_mode = args.final_test_manifest is not None
+    if args.eval_context_file and (not args.eval_only or final_test_mode):
+        raise ValueError("Multi-context evaluation is dev-only and requires --eval-only")
+    if final_test_mode:
+        if research_protocol is None:
+            raise ValueError("Sealed test mode requires --research-config")
+        if args.mask_conflicting_train_contexts:
+            raise ValueError("Training-only context masking is unavailable in sealed test mode")
+        if args.target_only_sample_weight != 1.0:
+            raise ValueError("Target-only sampling is unavailable in sealed test mode")
+        if args.train_context_dropout_rate > 0:
+            raise ValueError("Train context dropout is unavailable in sealed test mode")
+        expected_auth = hashlib.sha256(
+            f"{research_protocol['series']['id']}:{protocol_hash}".encode("utf-8")
+        ).hexdigest()
+        if os.environ.get("CEFR_FINAL_TEST_AUTH") != expected_auth:
+            raise PermissionError("Sealed test mode requires authorization from scripts/final_test.py")
+        if not args.eval_only or args.checkpoint_path is None:
+            raise ValueError("Sealed test mode requires --eval-only and --checkpoint-path")
+
+    # Load data. Candidate mode does not open test.csv.
+    if args.data_dir is not None:
+        processed_dir = args.data_dir
+    elif research_protocol is not None:
+        processed_dir = PROJECT_ROOT / research_protocol["dataset"]["output_dir"]
+    else:
+        processed_dir = Path(paths["data"]["processed_dir"])
     logger.info(f"Loading splits from {processed_dir}")
-    train_df, dev_df, test_df = load_splits(processed_dir)
+    train_df, dev_df = load_train_dev(processed_dir)
+    test_df = load_test(processed_dir) if final_test_mode else None
+    robustness_df = None
+    if args.robustness_input is not None:
+        if research_protocol is None or final_test_mode:
+            raise ValueError("Robustness inputs are available only in candidate research mode")
+        robustness_df = pd.read_csv(args.robustness_input)
+        required = {"source_row_id", "cefr", "scenario", "sentence", "target"}
+        if not required.issubset(robustness_df.columns):
+            raise ValueError(
+                f"Robustness input missing columns: {sorted(required - set(robustness_df.columns))}"
+            )
+        dev_labels = dev_df.set_index("source_row_id")["cefr"].to_dict()
+        if any(
+            source_id not in dev_labels or dev_labels[source_id] != label
+            for source_id, label in zip(robustness_df["source_row_id"], robustness_df["cefr"])
+        ):
+            raise ValueError("Robustness inputs must be label-preserving variants of locked dev rows")
+    if research_protocol is not None:
+        verify_dataset_manifest(
+            processed_dir,
+            protocol_hash=protocol_hash,
+            splits=("train", "dev", "test") if final_test_mode else ("train", "dev"),
+        )
+    dev_output_df = dev_df.copy()
+    dev_group_ids = None
+    multi_context_stats = {
+        "eval_context_file": None,
+        "eval_context_file_sha256": None,
+        "max_eval_contexts": 1,
+        "original_eval_rows": int(len(dev_df)),
+        "expanded_eval_rows": int(len(dev_df)),
+        "multi_context_groups": 0,
+        "mean_contexts_per_row": 1.0,
+    }
+    if args.eval_context_file:
+        dev_df, multi_context_stats = expand_eval_contexts(
+            dev_df, args.eval_context_file, args.max_eval_contexts
+        )
+        dev_group_ids = dev_df["eval_group_id"].tolist()
+        logger.info(f"Expanded dev contexts: {multi_context_stats}")
+    context_mask_stats = {
+        "masked_train_lemma_count": 0,
+        "masked_train_row_count": 0,
+        "masked_train_source_ids_sha256": None,
+    }
+    if args.mask_conflicting_train_contexts:
+        train_df, context_mask_stats = mask_conflicting_train_contexts(train_df)
+        if (
+            context_mask_stats["masked_train_lemma_count"] != 142
+            or context_mask_stats["masked_train_row_count"] != 305
+        ):
+            raise ValueError(f"Unexpected context-mask scope: {context_mask_stats}")
+        logger.info(f"Masked conflicting train contexts: {context_mask_stats}")
+    context_dropout_stats = {
+        "train_context_dropout_rate": float(args.train_context_dropout_rate),
+        "context_present_before_dropout": int(train_df["context_available"].sum()),
+        "dropped_train_context_count": 0,
+        "dropped_train_source_ids_sha256": None,
+        "target_only_train_rate_before_dropout": float((~train_df["context_available"]).mean()),
+        "target_only_train_rate_after_dropout": float((~train_df["context_available"]).mean()),
+    }
+    if args.train_context_dropout_rate > 0:
+        train_df, context_dropout_stats = drop_train_contexts(
+            train_df, args.train_context_dropout_rate, effective_seed
+        )
+        logger.info(f"Applied fixed train context dropout: {context_dropout_stats}")
     print_label_distribution(train_df, "Train")
 
     # Check if we have context data
@@ -605,15 +1019,46 @@ def main():
         logger.warning("No 'sentence' column. Building context cache from the external corpus.")
         corpus_dir = Path(paths["data"]["raw_dir"]) / "monolingual"
         context_cache = PROJECT_ROOT / "artifacts" / "context" / "lemma_sentences.json"
-        train_df, dev_df, test_df = attach_context_columns(
-            train_df, dev_df, test_df, corpus_dir=corpus_dir, cache_path=context_cache, logger=logger
+        candidate_frames = [train_df, dev_df]
+        if robustness_df is not None:
+            candidate_frames.append(robustness_df)
+        if final_test_mode:
+            candidate_frames.append(test_df)
+        enriched = attach_context_columns(
+            *candidate_frames, corpus_dir=corpus_dir, cache_path=context_cache, logger=logger
         )
+        train_df, dev_df = enriched[:2]
+        next_index = 2
+        if robustness_df is not None:
+            robustness_df = enriched[next_index]
+            next_index += 1
+        if final_test_mode:
+            test_df = enriched[next_index]
 
     # Extract any missing features
     suffix_inv = SuffixInventory(config.get("lang", "kaz"))
-    train_df = augment_with_features(train_df, suffix_inventory=suffix_inv)
-    dev_df = augment_with_features(dev_df, suffix_inventory=suffix_inv)
-    test_df = augment_with_features(test_df, suffix_inventory=suffix_inv)
+    train_df = augment_with_features(
+        train_df, suffix_inventory=suffix_inv,
+        lemma_freq_file=args.lemma_frequency_file,
+        surface_freq_file=args.surface_frequency_file,
+    )
+    dev_df = augment_with_features(
+        dev_df, suffix_inventory=suffix_inv,
+        lemma_freq_file=args.lemma_frequency_file,
+        surface_freq_file=args.surface_frequency_file,
+    )
+    if robustness_df is not None:
+        robustness_df = augment_with_features(
+            robustness_df, suffix_inventory=suffix_inv,
+            lemma_freq_file=args.lemma_frequency_file,
+            surface_freq_file=args.surface_frequency_file,
+        )
+    if final_test_mode:
+        test_df = augment_with_features(
+            test_df, suffix_inventory=suffix_inv,
+            lemma_freq_file=args.lemma_frequency_file,
+            surface_freq_file=args.surface_frequency_file,
+        )
 
     # Handcrafted features drive the MorphMLP; static emb_* vectors are optional.
     feature_cols = get_feature_columns()
@@ -622,13 +1067,19 @@ def main():
         feature_cols = feature_cols + emb_cols
 
     # Fill NaN for features that may be missing in some rows
-    for df in [train_df, dev_df, test_df]:
+    feature_frames = [train_df, dev_df]
+    if robustness_df is not None:
+        feature_frames.append(robustness_df)
+    if final_test_mode:
+        feature_frames.append(test_df)
+    for df in feature_frames:
         for c in feature_cols:
             if c in df.columns:
                 df[c] = df[c].fillna(0)
 
     model_dir = Path(paths["results"]["models"]) / model_name
-    model_dir.mkdir(parents=True, exist_ok=True)
+    if not model_dir.is_dir():
+        model_dir.mkdir(parents=True, exist_ok=True)
     feature_spec_path = model_dir / "feature_spec.json"
     loaded_feature_spec = None
 
@@ -680,7 +1131,10 @@ def main():
 
     train_df = apply_feature_stats(train_df, feature_stats)
     dev_df = apply_feature_stats(dev_df, feature_stats)
-    test_df = apply_feature_stats(test_df, feature_stats)
+    if robustness_df is not None:
+        robustness_df = apply_feature_stats(robustness_df, feature_stats)
+    if final_test_mode:
+        test_df = apply_feature_stats(test_df, feature_stats)
 
     morph_feature_count = sum(is_morph_feature(col) for col in selected_feature_cols)
     logger.info(
@@ -700,10 +1154,22 @@ def main():
     # Datasets
     train_dataset = DualDataset(train_df, tokenizer, char_vocab, selected_feature_cols)
     dev_dataset = DualDataset(dev_df, tokenizer, char_vocab, selected_feature_cols)
-    test_dataset = DualDataset(test_df, tokenizer, char_vocab, selected_feature_cols)
+    robustness_dataset = (
+        DualDataset(robustness_df, tokenizer, char_vocab, selected_feature_cols)
+        if robustness_df is not None else None
+    )
+    test_dataset = (
+        DualDataset(test_df, tokenizer, char_vocab, selected_feature_cols)
+        if final_test_mode else None
+    )
 
     # Dataloaders
     batch_size = args.batch_size or config.get("batch_size", 16)
+    target_only_sampling_stats = {
+        "target_only_sample_weight": float(args.target_only_sample_weight),
+        "target_only_train_rate": float((~train_df["context_available"]).mean()),
+        "target_only_expected_sample_rate": float((~train_df["context_available"]).mean()),
+    }
     if args.class_balanced_batches:
         balanced_sampler = ClassBalancedBatchSampler(
             train_dataset.labels,
@@ -720,6 +1186,23 @@ def main():
             f"Using class-balanced batch sampler: batches={len(balanced_sampler)}, "
             f"batch_size={batch_size}, classes={len(CEFR_LABELS)}"
         )
+    elif args.target_only_sample_weight != 1.0:
+        sample_weights, target_only_sampling_stats = target_only_sampling_weights(
+            train_df, args.target_only_sample_weight
+        )
+        target_only_sampler = WeightedRandomSampler(
+            sample_weights,
+            num_samples=len(train_dataset),
+            replacement=True,
+            generator=torch.Generator().manual_seed(effective_seed),
+        )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            sampler=target_only_sampler,
+            collate_fn=collate_dual_encoder,
+        )
+        logger.info(f"Using target-only weighted sampler: {target_only_sampling_stats}")
     else:
         train_loader = DataLoader(
             train_dataset,
@@ -728,10 +1211,23 @@ def main():
             collate_fn=collate_dual_encoder,
         )
     dev_loader = DataLoader(dev_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_dual_encoder)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_dual_encoder)
+    robustness_loader = (
+        DataLoader(
+            robustness_dataset, batch_size=batch_size, shuffle=False,
+            collate_fn=collate_dual_encoder,
+        )
+        if robustness_dataset is not None else None
+    )
+    test_loader = (
+        DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_dual_encoder)
+        if final_test_mode else None
+    )
 
     # Class weights
-    class_weights = compute_class_weights(train_df, device) if use_class_weights else None
+    class_weights = (
+        compute_class_weights(train_df, device, args.mid_class_weight_multiplier)
+        if use_class_weights else None
+    )
     if class_weights is not None:
         logger.info(f"Class weights: {dict(zip(CEFR_LABELS, class_weights.cpu().tolist()))}")
 
@@ -756,6 +1252,8 @@ def main():
     )
     tokenizer.resize_embeddings(model.context_encoder)
     model = model.to(device)
+    if device == "cuda":
+        torch.cuda.reset_peak_memory_stats()
 
     if args.checkpoint_path is not None:
         checkpoint = torch.load(args.checkpoint_path, map_location=device)
@@ -766,9 +1264,6 @@ def main():
         )
 
     # Discriminative learning rates: lower for transformer, higher for heads
-    transformer_lr = config.get("learning_rate", 2e-5)
-    head_lr = transformer_lr * 25  # 5e-4 when base is 2e-5
-
     optimizer = torch.optim.AdamW([
         {"params": model.context_encoder.parameters(), "lr": transformer_lr},
         {"params": model.morph_encoder.parameters(), "lr": head_lr},
@@ -788,20 +1283,27 @@ def main():
     best_dev_f1 = 0
     patience_counter = 0
     patience = config.get("early_stopping_patience", 7)
+    if research_protocol is not None:
+        patience = min(patience, research_protocol["evaluation"]["screening"]["patience"])
     if not args.eval_only:
+        training_started = time.perf_counter()
         for epoch in range(epochs):
             train_loss = train_epoch(
                 model, train_loader, optimizer, scheduler, device,
                 class_weights=class_weights,
                 label_smoothing_sigma=label_smoothing_sigma,
                 use_ordinal=use_ordinal,
+                use_ordinal_auxiliary=use_ordinal_auxiliary,
                 ordinal_weight=args.ordinal_weight,
                 loss_type=args.loss_type,
                 focal_gamma=args.focal_gamma,
                 emd_weight=args.emd_weight,
                 r_drop_alpha=args.r_drop_alpha,
             )
-            dev_metrics, _, _ = evaluate(model, dev_loader, device, use_ordinal=use_ordinal)
+            dev_metrics, _, _ = evaluate(
+                model, dev_loader, device, use_ordinal=use_ordinal,
+                group_ids=dev_group_ids,
+            )
 
             logger.info(
                 f"Epoch {epoch+1}/{epochs}: loss={train_loss:.4f}, "
@@ -821,29 +1323,42 @@ def main():
                     break
 
         model.load_state_dict(torch.load(model_dir / "best_model.pt", map_location=device))
+        training_seconds = time.perf_counter() - training_started
     elif args.checkpoint_path is None:
         raise ValueError("--eval-only requires --checkpoint-path")
+    else:
+        training_seconds = 0.0
 
-    # Load best and evaluate
-    dev_metrics, dev_preds, dev_probs = evaluate(model, dev_loader, device, use_ordinal=use_ordinal)
-    test_metrics, test_preds, test_probs = evaluate(model, test_loader, device, use_ordinal=use_ordinal)
+    # Load best and evaluate dev only in candidate mode.
+    inference_started = time.perf_counter()
+    tokenizer.reset_stats()
+    dev_metrics, dev_preds, dev_probs = evaluate(
+        model, dev_loader, device, use_ordinal=use_ordinal,
+        group_ids=dev_group_ids,
+    )
+    dev_metrics["training_seconds"] = training_seconds
+    dev_metrics["inference_latency_ms_per_example"] = (
+        1000 * (time.perf_counter() - inference_started) / len(dev_output_df)
+    )
+    dev_metrics.update({
+        "invalid_prediction_count": 0,
+        "target_span_failure_count": tokenizer.target_span_failure_count,
+        "nan_count": 0,
+        **multi_context_stats,
+    })
 
-    # Print summary
     print_metrics_summary(
         model_name=model_name,
         train_size=len(train_df),
-        dev_size=len(dev_df),
-        test_size=len(test_df),
+        dev_size=len(dev_output_df),
         dev_metrics=dev_metrics,
-        test_metrics=test_metrics,
         output_dir=Path(paths["results"]["dir"])
     )
 
-    # Save outputs
     results_dir = Path(paths["results"]["dir"])
-    save_metrics(
-        test_metrics,
-        f"{model_name}_test",
+    dev_metrics_path = save_metrics(
+        {**dev_metrics, "split": "dev"},
+        f"{model_name}_dev",
         results_dir / "metrics",
         extra_info={
             "seed": effective_seed,
@@ -854,34 +1369,174 @@ def main():
             "loss_type": args.loss_type,
             "focal_gamma": args.focal_gamma,
             "emd_weight": args.emd_weight,
+            "ordinal": args.ordinal,
+            "ordinal_auxiliary": args.ordinal_auxiliary,
+            "ordinal_weight": args.ordinal_weight,
             "class_balanced_batches": args.class_balanced_batches,
+            "mid_class_weight_multiplier": args.mid_class_weight_multiplier,
+            "effective_class_weights": class_weights.cpu().tolist() if class_weights is not None else None,
+            **target_only_sampling_stats,
+            **context_dropout_stats,
+            "mask_conflicting_train_contexts": args.mask_conflicting_train_contexts,
+            **context_mask_stats,
+            **multi_context_stats,
             "data_dir": str(processed_dir),
         },
     )
 
     # Save dev predictions for stacking
-    dev_df_out = dev_df.copy()
+    dev_df_out = dev_output_df.copy()
     dev_df_out['pred_cefr'] = dev_preds
     dev_df_out['gold_cefr'] = dev_df_out['cefr']
     for i, label in enumerate(CEFR_LABELS):
         dev_df_out[f'prob_{label}'] = dev_probs[:, i]
-    save_predictions(dev_df_out, model_name, results_dir / "predictions", split="dev")
-
-    # Save predictions
-    test_df_out = test_df.copy()
-    test_df_out['pred_cefr'] = test_preds
-    test_df_out['gold_cefr'] = test_df_out['cefr']
-    for i, label in enumerate(CEFR_LABELS):
-        test_df_out[f'prob_{label}'] = test_probs[:, i]
-    save_predictions(test_df_out, model_name, results_dir / "predictions")
+    dev_predictions_path = save_predictions(
+        dev_df_out, model_name, results_dir / "predictions", split="dev"
+    )
+    robustness_predictions_path = None
+    if robustness_loader is not None:
+        _, robustness_preds, robustness_probs = evaluate(
+            model, robustness_loader, device, use_ordinal=use_ordinal
+        )
+        robustness_output = robustness_df.copy()
+        robustness_output["gold_cefr"] = robustness_output["cefr"]
+        robustness_output["pred_cefr"] = robustness_preds
+        for index, label in enumerate(CEFR_LABELS):
+            robustness_output[f"prob_{label}"] = robustness_probs[:, index]
+        robustness_predictions_path = save_predictions(
+            robustness_output, model_name, results_dir / "predictions", split="robustness"
+        )
 
     update_run_index(
         model_name=model_name,
         config="training.yaml",
         dev_metrics=dev_metrics,
-        test_metrics=test_metrics,
         index_path=Path(paths["results"]["run_index"])
     )
+
+    if final_test_mode:
+        test_started = time.perf_counter()
+        test_metrics, test_preds, test_probs = evaluate(
+            model, test_loader, device, use_ordinal=use_ordinal,
+            temperature=args.temperature,
+        )
+        test_metrics["inference_latency_ms_per_example"] = (
+            1000 * (time.perf_counter() - test_started) / len(test_df)
+        )
+        final_dir = (
+            results_dir / "autoresearch" / research_protocol["series"]["id"] / "final-test"
+        )
+        final_metrics_path = save_metrics(
+            {**test_metrics, "split": "test"},
+            model_name,
+            final_dir,
+            extra_info={"champion_manifest": str(args.final_test_manifest)},
+        )
+        test_output = test_df[["source_row_id", "lemma", "pos", "cefr"]].copy()
+        test_output["pred_cefr"] = test_preds
+        for index, label in enumerate(CEFR_LABELS):
+            test_output[f"prob_{label}"] = test_probs[:, index]
+        final_predictions_path = save_predictions(
+            test_output, model_name, final_dir, split="test"
+        )
+        manifest = build_run_manifest(
+            root=PROJECT_ROOT,
+            series_id=research_protocol["series"]["id"],
+            proposal_id=args.proposal_id,
+            protocol_hash=protocol_hash,
+            seed=effective_seed,
+            configuration={
+                "split": "test",
+                "sealed": True,
+                "champion_manifest": str(args.final_test_manifest),
+                "temperature": args.temperature,
+            },
+            command=[sys.executable, *sys.argv],
+            metrics=test_metrics,
+            runtime_seconds=time.perf_counter() - started_at,
+            parameter_count=sum(parameter.numel() for parameter in model.parameters()),
+            peak_vram_bytes=(
+                torch.cuda.max_memory_allocated() if device == "cuda" else 0
+            ),
+            artifacts=[final_metrics_path, final_predictions_path],
+            outcome="sealed_test_complete",
+        )
+        manifest.update({
+            "champion_manifest": str(args.final_test_manifest),
+            "temperature": args.temperature,
+        })
+        write_json(
+            final_dir / "final-test-manifest.json", manifest, exclusive=True
+        )
+        return 0
+
+    if research_protocol is not None:
+        checkpoint_path = args.checkpoint_path if args.eval_only else model_dir / "best_model.pt"
+        checkpoint_feature_spec = checkpoint_path.parent / "feature_spec.json"
+        artifacts = [checkpoint_path, dev_metrics_path, dev_predictions_path]
+        if checkpoint_feature_spec.exists():
+            artifacts.append(checkpoint_feature_spec)
+        elif feature_spec_path.exists():
+            artifacts.append(feature_spec_path)
+        if robustness_predictions_path is not None:
+            artifacts.append(robustness_predictions_path)
+        manifest = build_run_manifest(
+            root=PROJECT_ROOT,
+            series_id=research_protocol["series"]["id"],
+            proposal_id=args.proposal_id,
+            protocol_hash=protocol_hash,
+            seed=effective_seed,
+            configuration={
+                "variant": args.variant, "pooling": args.pooling, "ordinal": args.ordinal,
+                "ordinal_auxiliary": args.ordinal_auxiliary,
+                "ordinal_weight": args.ordinal_weight, "freeze_top_n": freeze_top_n,
+                "epochs": epochs, "batch_size": batch_size, "feature_selection": args.feature_selection,
+                "feature_top_k": args.feature_top_k, "min_morph_features": args.min_morph_features,
+                "transformer_model": transformer_model, "loss_type": args.loss_type,
+                "transformer_learning_rate": transformer_lr,
+                "head_learning_rate": head_lr,
+                "label_smoothing_sigma": label_smoothing_sigma,
+                "focal_gamma": args.focal_gamma, "emd_weight": args.emd_weight,
+                "r_drop_alpha": args.r_drop_alpha,
+                "class_balanced_batches": args.class_balanced_batches,
+                "mid_class_weight_multiplier": args.mid_class_weight_multiplier,
+                "effective_class_weights": class_weights.cpu().tolist() if class_weights is not None else None,
+                **target_only_sampling_stats,
+                **context_dropout_stats,
+                "mask_conflicting_train_contexts": args.mask_conflicting_train_contexts,
+                **context_mask_stats,
+                "lemma_frequency_file": (
+                    str(args.lemma_frequency_file) if args.lemma_frequency_file else None
+                ),
+                "lemma_frequency_sha256": (
+                    sha256_file(args.lemma_frequency_file) if args.lemma_frequency_file else None
+                ),
+                "surface_frequency_file": (
+                    str(args.surface_frequency_file) if args.surface_frequency_file else None
+                ),
+                "surface_frequency_sha256": (
+                    sha256_file(args.surface_frequency_file) if args.surface_frequency_file else None
+                ),
+                **multi_context_stats,
+                "research_surface_changes": research_surface_changes(
+                    PROJECT_ROOT, research_protocol
+                ),
+            },
+            command=[sys.executable, *sys.argv],
+            metrics=dev_metrics,
+            runtime_seconds=time.perf_counter() - started_at,
+            parameter_count=sum(parameter.numel() for parameter in model.parameters()),
+            peak_vram_bytes=(
+                torch.cuda.max_memory_allocated() if device == "cuda" else 0
+            ),
+            artifacts=artifacts,
+            outcome="candidate_complete",
+        )
+        run_dir = (
+            results_dir / "autoresearch" / research_protocol["series"]["id"]
+            / args.proposal_id / f"seed-{effective_seed}"
+        )
+        write_json(run_dir / "run-manifest.json", manifest, exclusive=True)
 
     return 0
 
