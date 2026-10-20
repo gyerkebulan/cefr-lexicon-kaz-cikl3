@@ -1,0 +1,75 @@
+files: 5
+ensemble accuracy 0.3937 within1 0.6940
+
+error distance: {0: 0.394, 1: 0.3, 2: 0.19, 3: 0.091, 4: 0.024}
+
+by POS (n, acc, within1, mean|err|):
+         n    acc     w1    mae
+pos                            
+NOUN   279  0.394  0.667  1.093
+VERB   113  0.451  0.770  0.903
+ADJ     72  0.361  0.722  1.056
+ADV     25  0.240  0.720  1.040
+PRON    13  0.538  0.615  1.000
+NUM     12  0.583  0.917  0.500
+ADP      9  0.000  0.222  2.111
+MODAL    6  0.000  0.333  2.000
+INTJ     3  0.333  0.667  1.333
+AUX      2  0.500  1.000  0.500
+OTHER    2  1.000  1.000  0.000
+
+by context availability:
+                     n    acc     w1
+context_available                   
+False               23  0.478  0.870
+True               513  0.390  0.686
+
+by lemma length:
+            n    acc     w1
+lenbin                     
+(0, 4]    118  0.432  0.678
+(4, 6]    232  0.414  0.677
+(6, 8]    133  0.331  0.684
+(8, 11]    47  0.383  0.809
+(11, 40]    6  0.333  1.000
+
+confident errors of 3+ levels: n = 62
+    lemma  pos cefr pred_ens  conf  agree
+   ежелгі  ADJ   C1       A2  0.79    1.0
+   шегара NOUN   A2       C1  0.73    1.0
+   тәрбие NOUN   B2       A1  0.60    1.0
+қалжыңдау VERB   A2       C1  0.58    0.6
+    нешеу PRON   A2       C1  0.57    1.0
+     бөрі NOUN   C1       A2  0.57    1.0
+   шөлдеу VERB   A2       C1  0.57    1.0
+   қасқыр NOUN   A1       C1  0.56    0.8
+  сындыру VERB   A2       C1  0.56    0.8
+    бұйра  ADJ   A1       C1  0.55    0.8
+    күрең  ADJ   C1       A2  0.55    0.8
+    ұлғаю VERB   C1       A2  0.54    0.8
+ түймедақ NOUN   A2       C1  0.52    0.8
+   орамал NOUN   A1       C1  0.51    0.8
+
+overestimated by 2+ levels (n=84):
+    lemma  pos cefr pred_ens  conf  agree
+қалжыңдау VERB   A2       C1  0.58    0.6
+    қайшы NOUN   A1       B1  0.33    0.4
+    ереже NOUN   A1       C1  0.45    0.6
+    бұйра  ADJ   A1       C1  0.55    0.8
+  кереует NOUN   B1       C1  0.64    0.8
+   қасқыр NOUN   A1       C1  0.56    0.8
+   жаңбыр NOUN   A1       B2  0.42    0.6
+   шегара NOUN   A2       C1  0.73    1.0
+
+underestimated by 2+ levels (n=80):
+  lemma  pos cefr pred_ens  conf  agree
+керемет  ADJ   B2       A1  0.41    0.4
+   қаза NOUN   C1       A1  0.31    0.6
+  сауал NOUN   B2       A2  0.33    0.6
+   алша NOUN   B2       A2  0.46    0.8
+   епті  ADJ   B2       A2  0.60    0.8
+ұлғайту VERB   C1       B1  0.56    0.8
+жөнінде  ADP   B2       A2  0.30    0.6
+  ойшыл NOUN   B2       A2  0.57    0.8
+
+errors of 2+ levels identical in all seeds: n = 14 of 164

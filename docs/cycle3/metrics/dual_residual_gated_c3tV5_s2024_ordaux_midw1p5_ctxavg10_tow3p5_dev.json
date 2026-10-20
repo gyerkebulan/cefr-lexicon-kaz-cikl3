@@ -1,0 +1,155 @@
+{
+  "model": "dual_residual_gated_c3tV5_s2024_ordaux_midw1p5_ctxavg10_tow3p5_dev",
+  "config_path": null,
+  "timestamp": "2026-10-20T21:45:53.016722",
+  "accuracy": 0.34579439252336447,
+  "macro_f1": 0.3348938736327656,
+  "per_class": {
+    "A1": {
+      "precision": 0.4953271028037383,
+      "recall": 0.5145631067961165,
+      "f1": 0.5047619047619047,
+      "support": 103
+    },
+    "A2": {
+      "precision": 0.21296296296296297,
+      "recall": 0.27380952380952384,
+      "f1": 0.23958333333333334,
+      "support": 84
+    },
+    "B1": {
+      "precision": 0.27927927927927926,
+      "recall": 0.27927927927927926,
+      "f1": 0.27927927927927926,
+      "support": 111
+    },
+    "B2": {
+      "precision": 0.2676056338028169,
+      "recall": 0.19387755102040816,
+      "f1": 0.22485207100591717,
+      "support": 98
+    },
+    "C1": {
+      "precision": 0.427536231884058,
+      "recall": 0.4244604316546763,
+      "f1": 0.4259927797833935,
+      "support": 139
+    }
+  },
+  "confusion_matrix": [
+    [
+      53,
+      25,
+      11,
+      6,
+      8
+    ],
+    [
+      18,
+      23,
+      21,
+      9,
+      13
+    ],
+    [
+      17,
+      25,
+      31,
+      17,
+      21
+    ],
+    [
+      9,
+      13,
+      20,
+      19,
+      37
+    ],
+    [
+      10,
+      22,
+      28,
+      20,
+      59
+    ]
+  ],
+  "ordinal_mae": 1.1271028037383177,
+  "quadratic_weighted_kappa": 0.4276308574631503,
+  "far_error_rate": 0.3121495327102804,
+  "ordinal_correlation": 0.42894649411967534,
+  "negative_log_likelihood": 1.7446745714848886,
+  "brier_score": 0.8210069444034682,
+  "expected_calibration_error": 0.2255896906923938,
+  "mean_entropy": 1.061777810103215,
+  "mean_confidence": 0.5641532088845254,
+  "abstention": {
+    "0.50": {
+      "coverage": 0.5813084112149532,
+      "selective_accuracy": 0.3858520900321543
+    },
+    "0.60": {
+      "coverage": 0.4,
+      "selective_accuracy": 0.4392523364485981
+    },
+    "0.70": {
+      "coverage": 0.23738317757009345,
+      "selective_accuracy": 0.4881889763779528
+    },
+    "0.80": {
+      "coverage": 0.10467289719626169,
+      "selective_accuracy": 0.5535714285714286
+    },
+    "0.90": {
+      "coverage": 0.03364485981308411,
+      "selective_accuracy": 0.7222222222222222
+    }
+  },
+  "training_seconds": 0.0,
+  "inference_latency_ms_per_example": 32.695344786777675,
+  "invalid_prediction_count": 0,
+  "target_span_failure_count": 0,
+  "nan_count": 0,
+  "eval_context_file": "dataset/research/ar-cycle3-testeval/dev_contexts.json",
+  "eval_context_file_sha256": "6a707b3c5d41e5c4293381cde0efd6d4693e097a3f303561337a12c1a239c4aa",
+  "max_eval_contexts": 10,
+  "original_eval_rows": 535,
+  "expanded_eval_rows": 4293,
+  "multi_context_groups": 497,
+  "mean_contexts_per_row": 8.02429906542056,
+  "split": "dev",
+  "seed": 2024,
+  "feature_selection": "importance",
+  "feature_top_k": 72,
+  "min_morph_features": 20,
+  "transformer_model": "xlm-roberta-base",
+  "loss_type": "ce",
+  "focal_gamma": 2.0,
+  "emd_weight": 0.0,
+  "ordinal": false,
+  "ordinal_auxiliary": true,
+  "ordinal_weight": 0.5,
+  "class_balanced_batches": false,
+  "mid_class_weight_multiplier": 1.5,
+  "effective_class_weights": [
+    1.034024953842163,
+    1.9071428775787354,
+    1.451650619506836,
+    1.0905908346176147,
+    0.7715169787406921
+  ],
+  "target_only_sample_weight": 3.5,
+  "target_only_train_rate": 0.04654895666131621,
+  "target_only_expected_sample_rate": 0.14593817397555714,
+  "train_context_dropout_rate": 0.0,
+  "context_present_before_dropout": 2376,
+  "dropped_train_context_count": 0,
+  "dropped_train_source_ids_sha256": null,
+  "target_only_train_rate_before_dropout": 0.04654895666131621,
+  "target_only_train_rate_after_dropout": 0.04654895666131621,
+  "mask_conflicting_train_contexts": false,
+  "masked_train_lemma_count": 0,
+  "masked_train_row_count": 0,
+  "masked_train_source_ids_sha256": null,
+  "data_dir": "dataset/research/ar-cycle3-testeval",
+  "train_context_file": null
+}

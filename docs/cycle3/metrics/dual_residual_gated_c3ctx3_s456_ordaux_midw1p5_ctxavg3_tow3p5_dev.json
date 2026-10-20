@@ -1,0 +1,155 @@
+{
+  "model": "dual_residual_gated_c3ctx3_s456_ordaux_midw1p5_ctxavg3_tow3p5_dev",
+  "config_path": null,
+  "timestamp": "2026-10-20T20:42:59.473963",
+  "accuracy": 0.39365671641791045,
+  "macro_f1": 0.3640068009545921,
+  "per_class": {
+    "A1": {
+      "precision": 0.5368421052631579,
+      "recall": 0.49514563106796117,
+      "f1": 0.5151515151515151,
+      "support": 103
+    },
+    "A2": {
+      "precision": 0.37037037037037035,
+      "recall": 0.11904761904761904,
+      "f1": 0.18018018018018017,
+      "support": 84
+    },
+    "B1": {
+      "precision": 0.2777777777777778,
+      "recall": 0.40540540540540543,
+      "f1": 0.32967032967032966,
+      "support": 111
+    },
+    "B2": {
+      "precision": 0.373134328358209,
+      "recall": 0.25252525252525254,
+      "f1": 0.30120481927710846,
+      "support": 99
+    },
+    "C1": {
+      "precision": 0.43243243243243246,
+      "recall": 0.5755395683453237,
+      "f1": 0.49382716049382713,
+      "support": 139
+    }
+  },
+  "confusion_matrix": [
+    [
+      51,
+      4,
+      29,
+      7,
+      12
+    ],
+    [
+      17,
+      10,
+      30,
+      7,
+      20
+    ],
+    [
+      14,
+      4,
+      45,
+      15,
+      33
+    ],
+    [
+      6,
+      2,
+      26,
+      25,
+      40
+    ],
+    [
+      7,
+      7,
+      32,
+      13,
+      80
+    ]
+  ],
+  "ordinal_mae": 1.080223880597015,
+  "quadratic_weighted_kappa": 0.4414850003253725,
+  "far_error_rate": 0.3283582089552239,
+  "ordinal_correlation": 0.44793778273973295,
+  "negative_log_likelihood": 1.4876182376836433,
+  "brier_score": 0.739052057990824,
+  "expected_calibration_error": 0.09428558662602159,
+  "mean_entropy": 1.2421288304231035,
+  "mean_confidence": 0.48323836870776227,
+  "abstention": {
+    "0.50": {
+      "coverage": 0.3824626865671642,
+      "selective_accuracy": 0.5121951219512195
+    },
+    "0.60": {
+      "coverage": 0.20708955223880596,
+      "selective_accuracy": 0.5765765765765766
+    },
+    "0.70": {
+      "coverage": 0.07835820895522388,
+      "selective_accuracy": 0.6428571428571429
+    },
+    "0.80": {
+      "coverage": 0.033582089552238806,
+      "selective_accuracy": 0.7777777777777778
+    },
+    "0.90": {
+      "coverage": 0.009328358208955223,
+      "selective_accuracy": 1.0
+    }
+  },
+  "training_seconds": 0.0,
+  "inference_latency_ms_per_example": 8.081040962828574,
+  "invalid_prediction_count": 0,
+  "target_span_failure_count": 0,
+  "nan_count": 0,
+  "eval_context_file": "dataset/research/ar-cycle3-clean3563-20261020/dev_contexts.json",
+  "eval_context_file_sha256": "0b6cdd721e1ea8cc7967956a5a4aa3a65329b4cb4efdaf9dca66ce697ae15d4e",
+  "max_eval_contexts": 3,
+  "original_eval_rows": 536,
+  "expanded_eval_rows": 1510,
+  "multi_context_groups": 496,
+  "mean_contexts_per_row": 2.8171641791044775,
+  "split": "dev",
+  "seed": 456,
+  "feature_selection": "importance",
+  "feature_top_k": 72,
+  "min_morph_features": 20,
+  "transformer_model": "xlm-roberta-base",
+  "loss_type": "ce",
+  "focal_gamma": 2.0,
+  "emd_weight": 0.0,
+  "ordinal": false,
+  "ordinal_auxiliary": true,
+  "ordinal_weight": 0.5,
+  "class_balanced_batches": false,
+  "mid_class_weight_multiplier": 1.5,
+  "effective_class_weights": [
+    1.034024953842163,
+    1.9071428775787354,
+    1.451650619506836,
+    1.0905908346176147,
+    0.7715169787406921
+  ],
+  "target_only_sample_weight": 3.5,
+  "target_only_train_rate": 0.04654895666131621,
+  "target_only_expected_sample_rate": 0.14593817397555714,
+  "train_context_dropout_rate": 0.0,
+  "context_present_before_dropout": 2376,
+  "dropped_train_context_count": 0,
+  "dropped_train_source_ids_sha256": null,
+  "target_only_train_rate_before_dropout": 0.04654895666131621,
+  "target_only_train_rate_after_dropout": 0.04654895666131621,
+  "mask_conflicting_train_contexts": false,
+  "masked_train_lemma_count": 0,
+  "masked_train_row_count": 0,
+  "masked_train_source_ids_sha256": null,
+  "data_dir": "dataset/research/ar-cycle3-clean3563-20261020",
+  "train_context_file": null
+}

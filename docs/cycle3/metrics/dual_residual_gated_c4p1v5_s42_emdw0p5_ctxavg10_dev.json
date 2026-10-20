@@ -1,0 +1,155 @@
+{
+  "model": "dual_residual_gated_c4p1v5_s42_emdw0p5_ctxavg10_dev",
+  "config_path": null,
+  "timestamp": "2026-10-20T21:13:52.793259",
+  "accuracy": 0.4197761194029851,
+  "macro_f1": 0.40030977535766327,
+  "per_class": {
+    "A1": {
+      "precision": 0.5043478260869565,
+      "recall": 0.5631067961165048,
+      "f1": 0.5321100917431193,
+      "support": 103
+    },
+    "A2": {
+      "precision": 0.30337078651685395,
+      "recall": 0.32142857142857145,
+      "f1": 0.31213872832369943,
+      "support": 84
+    },
+    "B1": {
+      "precision": 0.35106382978723405,
+      "recall": 0.2972972972972973,
+      "f1": 0.32195121951219513,
+      "support": 111
+    },
+    "B2": {
+      "precision": 0.34210526315789475,
+      "recall": 0.26262626262626265,
+      "f1": 0.29714285714285715,
+      "support": 99
+    },
+    "C1": {
+      "precision": 0.5,
+      "recall": 0.5827338129496403,
+      "f1": 0.5382059800664452,
+      "support": 139
+    }
+  },
+  "confusion_matrix": [
+    [
+      58,
+      18,
+      11,
+      8,
+      8
+    ],
+    [
+      22,
+      27,
+      17,
+      5,
+      13
+    ],
+    [
+      22,
+      11,
+      33,
+      20,
+      25
+    ],
+    [
+      5,
+      16,
+      17,
+      26,
+      35
+    ],
+    [
+      8,
+      17,
+      16,
+      17,
+      81
+    ]
+  ],
+  "ordinal_mae": 1.007462686567164,
+  "quadratic_weighted_kappa": 0.5078627730183556,
+  "far_error_rate": 0.2873134328358209,
+  "ordinal_correlation": 0.5085562634080901,
+  "negative_log_likelihood": 1.4768260344297341,
+  "brier_score": 0.7297259916704923,
+  "expected_calibration_error": 0.0750885919192076,
+  "mean_entropy": 1.2077760536102027,
+  "mean_confidence": 0.49181278680852464,
+  "abstention": {
+    "0.50": {
+      "coverage": 0.38992537313432835,
+      "selective_accuracy": 0.5263157894736842
+    },
+    "0.60": {
+      "coverage": 0.22201492537313433,
+      "selective_accuracy": 0.5714285714285714
+    },
+    "0.70": {
+      "coverage": 0.12686567164179105,
+      "selective_accuracy": 0.6029411764705882
+    },
+    "0.80": {
+      "coverage": 0.05037313432835821,
+      "selective_accuracy": 0.6666666666666666
+    },
+    "0.90": {
+      "coverage": 0.007462686567164179,
+      "selective_accuracy": 0.75
+    }
+  },
+  "training_seconds": 0.0,
+  "inference_latency_ms_per_example": 21.583299050038097,
+  "invalid_prediction_count": 0,
+  "target_span_failure_count": 0,
+  "nan_count": 0,
+  "eval_context_file": "dataset/research/ar-cycle3-clean3563-20261020/dev_contexts.json",
+  "eval_context_file_sha256": "0b6cdd721e1ea8cc7967956a5a4aa3a65329b4cb4efdaf9dca66ce697ae15d4e",
+  "max_eval_contexts": 10,
+  "original_eval_rows": 536,
+  "expanded_eval_rows": 4233,
+  "multi_context_groups": 496,
+  "mean_contexts_per_row": 7.897388059701493,
+  "split": "dev",
+  "seed": 42,
+  "feature_selection": "importance",
+  "feature_top_k": 72,
+  "min_morph_features": 20,
+  "transformer_model": "xlm-roberta-base",
+  "loss_type": "ce",
+  "focal_gamma": 2.0,
+  "emd_weight": 0.5,
+  "ordinal": false,
+  "ordinal_auxiliary": false,
+  "ordinal_weight": 0.5,
+  "class_balanced_batches": false,
+  "mid_class_weight_multiplier": 1.0,
+  "effective_class_weights": [
+    1.034024953842163,
+    1.2714285850524902,
+    0.967767059803009,
+    1.0905908346176147,
+    0.7715169787406921
+  ],
+  "target_only_sample_weight": 1.0,
+  "target_only_train_rate": 0.04654895666131621,
+  "target_only_expected_sample_rate": 0.04654895666131621,
+  "train_context_dropout_rate": 0.0,
+  "context_present_before_dropout": 2376,
+  "dropped_train_context_count": 0,
+  "dropped_train_source_ids_sha256": null,
+  "target_only_train_rate_before_dropout": 0.04654895666131621,
+  "target_only_train_rate_after_dropout": 0.04654895666131621,
+  "mask_conflicting_train_contexts": false,
+  "masked_train_lemma_count": 0,
+  "masked_train_row_count": 0,
+  "masked_train_source_ids_sha256": null,
+  "data_dir": "dataset/research/ar-cycle3-clean3563-20261020",
+  "train_context_file": null
+}

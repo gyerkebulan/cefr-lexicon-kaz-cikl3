@@ -1,0 +1,113 @@
+{
+  "model": "full_feature_s789_dev",
+  "config_path": null,
+  "timestamp": "2026-10-20T21:40:53.104816",
+  "accuracy": 0.31962616822429907,
+  "macro_f1": 0.29666847030971233,
+  "per_class": {
+    "A1": {
+      "precision": 0.36936936936936937,
+      "recall": 0.39805825242718446,
+      "f1": 0.38317757009345793,
+      "support": 103
+    },
+    "A2": {
+      "precision": 0.18055555555555555,
+      "recall": 0.15476190476190477,
+      "f1": 0.16666666666666666,
+      "support": 84
+    },
+    "B1": {
+      "precision": 0.3113207547169811,
+      "recall": 0.2972972972972973,
+      "f1": 0.30414746543778803,
+      "support": 111
+    },
+    "B2": {
+      "precision": 0.22077922077922077,
+      "recall": 0.17346938775510204,
+      "f1": 0.19428571428571428,
+      "support": 98
+    },
+    "C1": {
+      "precision": 0.39644970414201186,
+      "recall": 0.48201438848920863,
+      "f1": 0.43506493506493504,
+      "support": 139
+    }
+  },
+  "confusion_matrix": [
+    [
+      41,
+      11,
+      17,
+      15,
+      19
+    ],
+    [
+      21,
+      13,
+      13,
+      13,
+      24
+    ],
+    [
+      21,
+      14,
+      33,
+      16,
+      27
+    ],
+    [
+      15,
+      14,
+      20,
+      17,
+      32
+    ],
+    [
+      13,
+      20,
+      23,
+      16,
+      67
+    ]
+  ],
+  "ordinal_mae": 1.3514018691588785,
+  "quadratic_weighted_kappa": 0.2517118191106472,
+  "far_error_rate": 0.4130841121495327,
+  "ordinal_correlation": 0.2522023690934508,
+  "negative_log_likelihood": 1.5931651969021356,
+  "brier_score": 0.7846693738734426,
+  "expected_calibration_error": 0.11060393820071866,
+  "mean_entropy": 1.3471250099304202,
+  "mean_confidence": 0.42767886145195716,
+  "abstention": {
+    "0.50": {
+      "coverage": 0.22803738317757008,
+      "selective_accuracy": 0.4262295081967213
+    },
+    "0.60": {
+      "coverage": 0.10467289719626169,
+      "selective_accuracy": 0.5
+    },
+    "0.70": {
+      "coverage": 0.06355140186915888,
+      "selective_accuracy": 0.5882352941176471
+    },
+    "0.80": {
+      "coverage": 0.041121495327102804,
+      "selective_accuracy": 0.6363636363636364
+    },
+    "0.90": {
+      "coverage": 0.016822429906542057,
+      "selective_accuracy": 0.6666666666666666
+    }
+  },
+  "inference_latency_ms_per_example": 0.5366113794114545,
+  "training_seconds": 0.9678256630431861,
+  "invalid_prediction_count": 0,
+  "target_span_failure_count": 0,
+  "nan_count": 0,
+  "split": "dev"
+}

@@ -1,0 +1,155 @@
+{
+  "model": "dual_residual_gated_c4p1v5_s123_emdw0p5_ctxavg10_dev",
+  "config_path": null,
+  "timestamp": "2026-10-20T21:18:20.285659",
+  "accuracy": 0.39738805970149255,
+  "macro_f1": 0.36482224693988974,
+  "per_class": {
+    "A1": {
+      "precision": 0.5,
+      "recall": 0.5436893203883495,
+      "f1": 0.5209302325581395,
+      "support": 103
+    },
+    "A2": {
+      "precision": 0.27450980392156865,
+      "recall": 0.16666666666666666,
+      "f1": 0.2074074074074074,
+      "support": 84
+    },
+    "B1": {
+      "precision": 0.27586206896551724,
+      "recall": 0.21621621621621623,
+      "f1": 0.24242424242424243,
+      "support": 111
+    },
+    "B2": {
+      "precision": 0.30392156862745096,
+      "recall": 0.31313131313131315,
+      "f1": 0.30845771144278605,
+      "support": 99
+    },
+    "C1": {
+      "precision": 0.4782608695652174,
+      "recall": 0.6330935251798561,
+      "f1": 0.544891640866873,
+      "support": 139
+    }
+  },
+  "confusion_matrix": [
+    [
+      56,
+      10,
+      14,
+      13,
+      10
+    ],
+    [
+      22,
+      14,
+      21,
+      9,
+      18
+    ],
+    [
+      23,
+      7,
+      24,
+      28,
+      29
+    ],
+    [
+      6,
+      10,
+      13,
+      31,
+      39
+    ],
+    [
+      5,
+      10,
+      15,
+      21,
+      88
+    ]
+  ],
+  "ordinal_mae": 1.0485074626865671,
+  "quadratic_weighted_kappa": 0.4951948157871654,
+  "far_error_rate": 0.30223880597014924,
+  "ordinal_correlation": 0.5004029502733364,
+  "negative_log_likelihood": 1.4451960787678653,
+  "brier_score": 0.7254144357636096,
+  "expected_calibration_error": 0.09553159580583664,
+  "mean_entropy": 1.219314837727882,
+  "mean_confidence": 0.4852014955447534,
+  "abstention": {
+    "0.50": {
+      "coverage": 0.40671641791044777,
+      "selective_accuracy": 0.5091743119266054
+    },
+    "0.60": {
+      "coverage": 0.19962686567164178,
+      "selective_accuracy": 0.5794392523364486
+    },
+    "0.70": {
+      "coverage": 0.1044776119402985,
+      "selective_accuracy": 0.625
+    },
+    "0.80": {
+      "coverage": 0.033582089552238806,
+      "selective_accuracy": 0.7222222222222222
+    },
+    "0.90": {
+      "coverage": 0.009328358208955223,
+      "selective_accuracy": 1.0
+    }
+  },
+  "training_seconds": 0.0,
+  "inference_latency_ms_per_example": 20.819100662509896,
+  "invalid_prediction_count": 0,
+  "target_span_failure_count": 0,
+  "nan_count": 0,
+  "eval_context_file": "dataset/research/ar-cycle3-clean3563-20261020/dev_contexts.json",
+  "eval_context_file_sha256": "0b6cdd721e1ea8cc7967956a5a4aa3a65329b4cb4efdaf9dca66ce697ae15d4e",
+  "max_eval_contexts": 10,
+  "original_eval_rows": 536,
+  "expanded_eval_rows": 4233,
+  "multi_context_groups": 496,
+  "mean_contexts_per_row": 7.897388059701493,
+  "split": "dev",
+  "seed": 123,
+  "feature_selection": "importance",
+  "feature_top_k": 72,
+  "min_morph_features": 20,
+  "transformer_model": "xlm-roberta-base",
+  "loss_type": "ce",
+  "focal_gamma": 2.0,
+  "emd_weight": 0.5,
+  "ordinal": false,
+  "ordinal_auxiliary": false,
+  "ordinal_weight": 0.5,
+  "class_balanced_batches": false,
+  "mid_class_weight_multiplier": 1.0,
+  "effective_class_weights": [
+    1.034024953842163,
+    1.2714285850524902,
+    0.967767059803009,
+    1.0905908346176147,
+    0.7715169787406921
+  ],
+  "target_only_sample_weight": 1.0,
+  "target_only_train_rate": 0.04654895666131621,
+  "target_only_expected_sample_rate": 0.04654895666131621,
+  "train_context_dropout_rate": 0.0,
+  "context_present_before_dropout": 2376,
+  "dropped_train_context_count": 0,
+  "dropped_train_source_ids_sha256": null,
+  "target_only_train_rate_before_dropout": 0.04654895666131621,
+  "target_only_train_rate_after_dropout": 0.04654895666131621,
+  "mask_conflicting_train_contexts": false,
+  "masked_train_lemma_count": 0,
+  "masked_train_row_count": 0,
+  "masked_train_source_ids_sha256": null,
+  "data_dir": "dataset/research/ar-cycle3-clean3563-20261020",
+  "train_context_file": null
+}
