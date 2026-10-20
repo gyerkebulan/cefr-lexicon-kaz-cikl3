@@ -1,0 +1,56 @@
+
+== V2*: test words 535, networks 5, T(dev)=2.00
+single mean  acc 0.3417±0.0138 mf1 0.3329±0.0143 mae 1.118 qwk 0.409 ece 0.202 w1 0.692 nll 1.732
+ensemble     acc 0.3439 mf1 0.3378 mae 1.112 qwk 0.409 ece 0.160 w1 0.697 nll 1.562
+ens + T(dev) acc 0.3439 mf1 0.3378 mae 1.112 qwk 0.409 ece 0.043 w1 0.697 nll 1.465
+ensemble F1 by level: A1 0.480 A2 0.229 B1 0.336 B2 0.255 C1 0.389
+ensemble 95% CI acc [0.303, 0.385] within1 [0.658, 0.733]
+
+== V3: test words 535, networks 5, T(dev)=2.50
+single mean  acc 0.3346±0.0085 mf1 0.3262±0.0093 mae 1.132 qwk 0.406 ece 0.221 w1 0.701 nll 1.778
+ensemble     acc 0.3421 mf1 0.3368 mae 1.108 qwk 0.424 ece 0.187 w1 0.710 nll 1.633
+ens + T(dev) acc 0.3421 mf1 0.3368 mae 1.108 qwk 0.424 ece 0.049 w1 0.710 nll 1.462
+ensemble F1 by level: A1 0.493 A2 0.225 B1 0.293 B2 0.289 C1 0.384
+ensemble 95% CI acc [0.299, 0.381] within1 [0.667, 0.750]
+
+== V4: test words 535, networks 5, T(dev)=2.05
+single mean  acc 0.3316±0.0304 mf1 0.3178±0.0226 mae 1.178 qwk 0.382 ece 0.293 w1 0.674 nll 2.096
+ensemble     acc 0.3346 mf1 0.3242 mae 1.151 qwk 0.410 ece 0.217 w1 0.675 nll 1.621
+ens + T(dev) acc 0.3346 mf1 0.3242 mae 1.151 qwk 0.410 ece 0.064 w1 0.675 nll 1.477
+ensemble F1 by level: A1 0.423 A2 0.201 B1 0.300 B2 0.281 C1 0.416
+ensemble 95% CI acc [0.297, 0.374] within1 [0.634, 0.716]
+
+== V5: test words 535, networks 5, T(dev)=1.35
+single mean  acc 0.3518±0.0351 mf1 0.3340±0.0273 mae 1.124 qwk 0.423 ece 0.169 w1 0.689 nll 1.648
+ensemble     acc 0.3701 mf1 0.3600 mae 1.062 qwk 0.464 ece 0.119 w1 0.712 nll 1.458
+ens + T(dev) acc 0.3701 mf1 0.3600 mae 1.062 qwk 0.464 ece 0.058 w1 0.712 nll 1.429
+ensemble F1 by level: A1 0.545 A2 0.245 B1 0.302 B2 0.247 C1 0.461
+ensemble 95% CI acc [0.331, 0.413] within1 [0.671, 0.751]
+
+== V6: test words 535, networks 5, T(dev)=0.95
+single mean  acc 0.3854±0.0134 mf1 0.3786±0.0132 mae 0.961 qwk 0.539 ece 0.070 w1 0.750 nll 1.420
+ensemble     acc 0.3907 mf1 0.3889 mae 0.929 qwk 0.570 ece 0.067 w1 0.763 nll 1.364
+ens + T(dev) acc 0.3907 mf1 0.3889 mae 0.929 qwk 0.570 ece 0.077 w1 0.763 nll 1.365
+ensemble F1 by level: A1 0.643 A2 0.261 B1 0.230 B2 0.357 C1 0.453
+ensemble 95% CI acc [0.351, 0.430] within1 [0.727, 0.798]
+confusion (rows true):
+[[64 23  7  5  4]
+ [15 23 24 10 12]
+ [12 26 26 30 17]
+ [ 2  9 23 38 26]
+ [ 3 11 35 32 58]]
+error distance: {0: 0.391, 1: 0.372, 2: 0.168, 3: 0.056, 4: 0.013}
+
+Paired bootstrap of ensembles, V6 minus other (95% CI):
+  V6-V2* acc: +0.0467 CI [+0.0000, +0.0953]
+  V6-V2* within1: +0.0650 CI [+0.0206, +0.1084]
+  V6-V2* mf1: +0.0517 CI [+0.0068, +0.0974]
+  V6-V3 acc: +0.0487 CI [+0.0056, +0.0935]
+  V6-V3 within1: +0.0522 CI [+0.0093, +0.0916]
+  V6-V3 mf1: +0.0527 CI [+0.0094, +0.0969]
+  V6-V4 acc: +0.0558 CI [+0.0093, +0.1010]
+  V6-V4 within1: +0.0876 CI [+0.0467, +0.1290]
+  V6-V4 mf1: +0.0646 CI [+0.0225, +0.1098]
+  V6-V5 acc: +0.0206 CI [-0.0224, +0.0636]
+  V6-V5 within1: +0.0499 CI [+0.0112, +0.0897]
+  V6-V5 mf1: +0.0296 CI [-0.0122, +0.0715]

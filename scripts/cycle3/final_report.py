@@ -8,7 +8,7 @@ os.chdir(os.path.expanduser("~/cefr-lexicon-kaz/results/predictions"))
 L = ["A1", "A2", "B1", "B2", "C1"]
 M = {l: i for i, l in enumerate(L)}
 MODELS = {  # name: (dev tag, test tag)
-    "V3": ("c3v3", "c3tV3"), "V4": ("c3v4", "c3tV4"), "V5": ("c3v5", "c3tV5"), "V6": ("c4p4v5", "c3tV6"),
+    "V2*": ("c3v2star", "c3tV2"), "V3": ("c3v3", "c3tV3"), "V4": ("c3v4", "c3tV4"), "V5": ("c3v5", "c3tV5"), "V6": ("c4p4v5", "c3tV6"),
 }
 rng = np.random.default_rng(0)
 
@@ -86,7 +86,7 @@ if "V6" in res:
     print("\nPaired bootstrap of ensembles, V6 minus other (95% CI):")
     p6 = res["V6"]["P"].argmax(1)
     B = 2000; idx = rng.integers(0, len(y), (B, len(y)))
-    for other in ("V3", "V4", "V5"):
+    for other in ("V2*", "V3", "V4", "V5"):
         if other not in res:
             continue
         po = res[other]["P"].argmax(1)
