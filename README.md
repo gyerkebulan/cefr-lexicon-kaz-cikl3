@@ -7,6 +7,17 @@ submitted to *PeerJ Computer Science*.
 - Archived release (DOI): https://doi.org/10.5281/zenodo.19365834
 - Dataset mirror: https://huggingface.co/datasets/Gulnur7/kazakh-lexical-complexity-classes
 
+## Передача проекта - 16 октября 2026
+
+Начните с [инструкции по передаче](docs/HANDOFF.md). Готовые файлы находятся локально в
+`artifacts/handoff-2026-10-16/`: краткий PDF, пакет исходников/данных/отчётов и отдельные веса.
+Исследовательские версии августа и сентября сохранены отдельно от основной версии.
+
+Ниже сохранено описание исходного проекта. Числа из рукописи не следует считать
+повторно подтверждёнными: локальные исходные splits содержат 3 108 / 671 / 671 строк
+(4 450 суммарно), а поздние серии используют другие разбиения. Результаты и ограничения
+каждой серии перечислены в передаваемом реестре экспериментов.
+
 ## Description
 
 This repository provides the first CEFR-graded lexicon for the Kazakh language (4,561 lemma–POS entries across A1–C1), together with the feature extraction pipeline, classical baselines, neural context/morphology encoders, gated fusion model, cross-lingual projection code, and evaluation scripts used to produce the results reported in the manuscript.
@@ -33,7 +44,7 @@ Field descriptions (CSV):
 ## Code Information
 
 ```
-morph-lexical-prediction-kaz/
+cefr-lexicon-kaz/
 ├── config/           # YAML configs (training, paths, crosslingual, suffixes)
 ├── src/              # Feature extraction, data prep, models, metrics
 │   └── models/       # Baselines, context/morph encoders, fusion, CORAL loss
@@ -100,7 +111,7 @@ python scripts/train_context.py --variant context_only_xlmr
 # Dual encoder with concatenation fusion
 python scripts/train_dual.py --variant dual_concat
 
-# Dual encoder with gated fusion (best model)
+# Dual encoder with gated fusion
 python scripts/train_dual.py --variant dual_gated
 ```
 
@@ -126,7 +137,7 @@ done
 - scikit-learn ≥ 1.3
 - pandas, numpy, PyYAML, tqdm
 
-Full pinned dependencies are in `environment.yml`.
+The baseline dependency list is in `environment.yml`; it is not version-pinned. Use the recorded environment of the selected experiment for reproduction.
 
 Training was performed on NVIDIA A100 (40 GB) GPUs. Classical baselines run on CPU in under one minute; the full dual-encoder with XLM-RoBERTa-base trains in roughly 30 minutes per seed on a single A100.
 

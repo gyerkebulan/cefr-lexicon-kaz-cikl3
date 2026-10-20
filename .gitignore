@@ -32,3 +32,20 @@ runs/
 
 dataset/
 
+# Local AI-agent instructions, memory, tools, and runtime state
+.agent/
+.claude/
+.codex/
+.gemini/
+AGENTS.md
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+
+# Local research results, mirrors, and document output
+results/
+remote_mirror/
+outputs/
+output/
+tmp/
+.pytest_cache/
