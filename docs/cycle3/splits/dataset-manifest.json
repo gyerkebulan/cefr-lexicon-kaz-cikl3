@@ -1,0 +1,82 @@
+{
+ "series_id": "ar-cycle3-clean3563-20261020",
+ "source_sha256": "aba623686a069f12497c5fbaf16d69e7975947aaf5b17954f2d3b8a37b163477",
+ "context_cache_sha256": "7bca04c2fc2ab98d663ce2556ee1637779667325e6181eebd019ef533b99dfd6",
+ "protocol": {
+  "seed": 42,
+  "proportions": {
+   "train": 0.7,
+   "dev": 0.15,
+   "test": 0.15
+  },
+  "stratify": [
+   "cefr",
+   "amb",
+   "pos",
+   "gsize"
+  ],
+  "min_len_edit_distance": 6,
+  "group_links": [
+   "same word",
+   "pair column",
+   "same context sentence hash",
+   "edit distance <= 1 (len >= 6)"
+  ]
+ },
+ "counts": {
+  "train": 2492,
+  "dev": 536,
+  "test": 535
+ },
+ "groups_total": 2677,
+ "class_counts": {
+  "train": {
+   "A1": 482,
+   "A2": 392,
+   "B1": 515,
+   "B2": 457,
+   "C1": 646
+  },
+  "dev": {
+   "A1": 103,
+   "A2": 84,
+   "B1": 111,
+   "B2": 99,
+   "C1": 139
+  },
+  "test": {
+   "A1": 103,
+   "A2": 84,
+   "B1": 111,
+   "B2": 98,
+   "C1": 139
+  }
+ },
+ "context_available_share": {
+  "train": 0.9535,
+  "dev": 0.9571,
+  "test": 0.957
+ },
+ "ambiguous_lemmas": 1,
+ "checks": {
+  "normalized_lemma_train_dev_overlap": 0,
+  "group_id_train_dev_overlap": 0,
+  "context_hash_train_dev_overlap": 0,
+  "near_duplicate_len6plus_train_dev_overlap": 0,
+  "normalized_lemma_train_test_overlap": 0,
+  "group_id_train_test_overlap": 0,
+  "context_hash_train_test_overlap": 0,
+  "near_duplicate_len6plus_train_test_overlap": 0,
+  "normalized_lemma_dev_test_overlap": 0,
+  "group_id_dev_test_overlap": 0,
+  "context_hash_dev_test_overlap": 0,
+  "near_duplicate_len6plus_dev_test_overlap": 0,
+  "pair_partners_in_different_splits": 0
+ },
+ "output_sha256": {
+  "train": "cf258695948af35180601a267e7909ed289dabecd98dbba53ef7667bbaf9a74a",
+  "dev": "58f5a68f6a696b87643e8d2c7bef6522b15f0eed07701ecf7efb3667bffc4f62",
+  "test": "c994aa0413776fb0e21e81866afaa33792ef64d564a40790e8c82e9211c7510a"
+ },
+ "sealed_test_copied": false
+}
