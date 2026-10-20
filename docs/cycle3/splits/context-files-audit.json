@@ -1,0 +1,27 @@
+{
+ "max_contexts": 10,
+ "pool_sha256": "698b69998f0d4199c8517288888242ae1753cb8538fcb877d093adac6c8bb2a7",
+ "train": {
+  "lemmas": 2327,
+  "extra_contexts": 18183,
+  "removed_shared_sentences": 1128,
+  "mean_contexts": 8.642
+ },
+ "dev": {
+  "lemmas": 501,
+  "extra_contexts": 3622,
+  "removed_shared_sentences": 636,
+  "mean_contexts": 8.076
+ },
+ "test": {
+  "lemmas": 503,
+  "extra_contexts": 3702,
+  "removed_shared_sentences": 682,
+  "mean_contexts": 8.225
+ },
+ "cross_split_sentence_overlap": {
+  "train_dev": 0,
+  "train_test": 0,
+  "dev_test": 0
+ }
+}

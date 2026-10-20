@@ -1305,7 +1305,7 @@ def main():
 
     if args.checkpoint_path is not None:
         checkpoint = torch.load(args.checkpoint_path, map_location=device)
-        load_result = model.load_state_dict(checkpoint, strict=False)
+        load_result = model.load_state_dict(checkpoint, strict=True)
         logger.info(
             f"Loaded checkpoint from {args.checkpoint_path} "
             f"(missing={load_result.missing_keys}, unexpected={load_result.unexpected_keys})"
@@ -1318,7 +1318,12 @@ def main():
         {"params": model.fusion.parameters(), "lr": head_lr},
         {"params": model.classifier.parameters(), "lr": head_lr},
         {"params": model.ordinal_head.parameters(), "lr": head_lr},
+        {"params": model.fusion_norm.parameters(), "lr": head_lr},
     ], weight_decay=config.get("weight_decay", 0.01))
+
+    optimizer_ids = [id(param) for group in optimizer.param_groups for param in group["params"]]
+    assert len(optimizer_ids) == len(set(optimizer_ids))
+    assert {id(param) for param in model.parameters() if param.requires_grad} <= set(optimizer_ids)
 
     logger.info(f"Discriminative LR: transformer={transformer_lr}, heads={head_lr}")
 
@@ -1329,6 +1334,7 @@ def main():
 
     # Training loop
     best_dev_f1 = 0
+    best_state = None
     patience_counter = 0
     patience = config.get("early_stopping_patience", 7)
     train_span_failures = []
@@ -1367,15 +1373,19 @@ def main():
             if dev_metrics['macro_f1'] > best_dev_f1:
                 best_dev_f1 = dev_metrics['macro_f1']
                 patience_counter = 0
-                torch.save(model.state_dict(), model_dir / "best_model.pt.tmp")
-                os.replace(model_dir / "best_model.pt.tmp", model_dir / "best_model.pt")
+                best_state = {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
             else:
                 patience_counter += 1
                 if patience_counter >= patience:
                     logger.info(f"Early stopping at epoch {epoch+1}")
                     break
 
-        model.load_state_dict(torch.load(model_dir / "best_model.pt", map_location=device))
+        if best_state is None:
+            raise RuntimeError("No best development checkpoint selected")
+        torch.save(best_state, model_dir / "best_model.pt.tmp")
+        os.replace(model_dir / "best_model.pt.tmp", model_dir / "best_model.pt")
+        del best_state
+        model.load_state_dict(torch.load(model_dir / "best_model.pt", map_location=device), strict=True)
         training_seconds = time.perf_counter() - training_started
     elif args.checkpoint_path is None:
         raise ValueError("--eval-only requires --checkpoint-path")
