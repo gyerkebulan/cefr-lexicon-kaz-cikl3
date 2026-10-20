@@ -1,0 +1,155 @@
+{
+  "model": "dual_gated_c3T2.0v3_s456_dev",
+  "config_path": null,
+  "timestamp": "2026-10-20T20:46:35.082064",
+  "accuracy": 0.34328358208955223,
+  "macro_f1": 0.34092199676681506,
+  "per_class": {
+    "A1": {
+      "precision": 0.45454545454545453,
+      "recall": 0.4368932038834951,
+      "f1": 0.44554455445544555,
+      "support": 103
+    },
+    "A2": {
+      "precision": 0.2727272727272727,
+      "recall": 0.35714285714285715,
+      "f1": 0.30927835051546393,
+      "support": 84
+    },
+    "B1": {
+      "precision": 0.2887323943661972,
+      "recall": 0.36936936936936937,
+      "f1": 0.3241106719367589,
+      "support": 111
+    },
+    "B2": {
+      "precision": 0.22580645161290322,
+      "recall": 0.21212121212121213,
+      "f1": 0.21875,
+      "support": 99
+    },
+    "C1": {
+      "precision": 0.5108695652173914,
+      "recall": 0.3381294964028777,
+      "f1": 0.4069264069264069,
+      "support": 139
+    }
+  },
+  "confusion_matrix": [
+    [
+      45,
+      23,
+      15,
+      15,
+      5
+    ],
+    [
+      18,
+      30,
+      15,
+      12,
+      9
+    ],
+    [
+      24,
+      18,
+      41,
+      17,
+      11
+    ],
+    [
+      8,
+      15,
+      35,
+      21,
+      20
+    ],
+    [
+      4,
+      24,
+      36,
+      28,
+      47
+    ]
+  ],
+  "ordinal_mae": 1.126865671641791,
+  "quadratic_weighted_kappa": 0.40133363491787966,
+  "far_error_rate": 0.332089552238806,
+  "ordinal_correlation": 0.4076550339129003,
+  "negative_log_likelihood": 1.8358940277572138,
+  "brier_score": 0.8373990716104507,
+  "expected_calibration_error": 0.21409186506225322,
+  "mean_entropy": 1.0565462136581605,
+  "mean_confidence": 0.5541879515096655,
+  "abstention": {
+    "0.50": {
+      "coverage": 0.5708955223880597,
+      "selective_accuracy": 0.39215686274509803
+    },
+    "0.60": {
+      "coverage": 0.34701492537313433,
+      "selective_accuracy": 0.4838709677419355
+    },
+    "0.70": {
+      "coverage": 0.18097014925373134,
+      "selective_accuracy": 0.5463917525773195
+    },
+    "0.80": {
+      "coverage": 0.10261194029850747,
+      "selective_accuracy": 0.5454545454545454
+    },
+    "0.90": {
+      "coverage": 0.029850746268656716,
+      "selective_accuracy": 0.625
+    }
+  },
+  "training_seconds": 0.0,
+  "inference_latency_ms_per_example": 3.605502391748353,
+  "invalid_prediction_count": 0,
+  "target_span_failure_count": 0,
+  "nan_count": 0,
+  "eval_context_file": null,
+  "eval_context_file_sha256": null,
+  "max_eval_contexts": 1,
+  "original_eval_rows": 536,
+  "expanded_eval_rows": 536,
+  "multi_context_groups": 0,
+  "mean_contexts_per_row": 1.0,
+  "split": "dev",
+  "seed": 456,
+  "feature_selection": "importance",
+  "feature_top_k": 72,
+  "min_morph_features": 20,
+  "transformer_model": "xlm-roberta-base",
+  "loss_type": "ce",
+  "focal_gamma": 2.0,
+  "emd_weight": 0.0,
+  "ordinal": false,
+  "ordinal_auxiliary": false,
+  "ordinal_weight": 0.5,
+  "class_balanced_batches": false,
+  "mid_class_weight_multiplier": 1.0,
+  "effective_class_weights": [
+    1.034024953842163,
+    1.2714285850524902,
+    0.967767059803009,
+    1.0905908346176147,
+    0.7715169787406921
+  ],
+  "target_only_sample_weight": 1.0,
+  "target_only_train_rate": 0.04654895666131621,
+  "target_only_expected_sample_rate": 0.04654895666131621,
+  "train_context_dropout_rate": 0.0,
+  "context_present_before_dropout": 2376,
+  "dropped_train_context_count": 0,
+  "dropped_train_source_ids_sha256": null,
+  "target_only_train_rate_before_dropout": 0.04654895666131621,
+  "target_only_train_rate_after_dropout": 0.04654895666131621,
+  "mask_conflicting_train_contexts": false,
+  "masked_train_lemma_count": 0,
+  "masked_train_row_count": 0,
+  "masked_train_source_ids_sha256": null,
+  "data_dir": "dataset/research/ar-cycle3-clean3563-20261020",
+  "train_context_file": null
+}
