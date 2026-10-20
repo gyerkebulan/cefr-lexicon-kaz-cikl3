@@ -7,6 +7,10 @@ submitted to *PeerJ Computer Science*.
 - Archived release (DOI): https://doi.org/10.5281/zenodo.19365834
 - Dataset mirror: https://huggingface.co/datasets/Gulnur7/kazakh-lexical-complexity-classes
 
+## Cycle 3 (testing and refinement)
+
+Data protocol, run scripts, analysis scripts and held-out results of cycle 3: see [docs/CYCLE3.md](docs/CYCLE3.md).
+
 ## Передача проекта - 16 октября 2026
 
 Начните с [инструкции по передаче](docs/HANDOFF.md). Готовые файлы находятся локально в
