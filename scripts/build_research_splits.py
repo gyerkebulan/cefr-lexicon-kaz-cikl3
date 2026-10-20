@@ -8,6 +8,7 @@ import hashlib
 import json
 import sys
 import unicodedata
+from itertools import combinations
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -97,17 +98,32 @@ def assign_groups(
     groups: list[list[int]],
     proportions: dict[str, float],
     seed: int,
+    stratify_columns: tuple[str, ...] = ("cefr",),
 ) -> dict[str, list[int]]:
+    missing = set(stratify_columns) - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing stratification columns: {sorted(missing)}")
     rng = np.random.default_rng(seed)
     split_names = list(proportions)
     target_size = {name: proportions[name] * len(df) for name in split_names}
-    totals = Counter(df["cefr"])
-    target_labels = {
-        name: {label: proportions[name] * totals[label] for label in CEFR_LABELS}
+    totals = {
+        column: Counter(df[column].astype(str)) for column in stratify_columns
+    }
+    targets = {
+        name: {
+            column: {
+                value: proportions[name] * count
+                for value, count in totals[column].items()
+            }
+            for column in stratify_columns
+        }
         for name in split_names
     }
     current_size = Counter()
-    current_labels = {name: Counter() for name in split_names}
+    current = {
+        name: {column: Counter() for column in stratify_columns}
+        for name in split_names
+    }
     assigned = {name: [] for name in split_names}
     order = list(range(len(groups)))
     rng.shuffle(order)
@@ -115,7 +131,10 @@ def assign_groups(
 
     for group_index in order:
         indices = groups[group_index]
-        labels = Counter(df.loc[indices, "cefr"])
+        strata = {
+            column: Counter(df.loc[indices, column].astype(str))
+            for column in stratify_columns
+        }
         candidates = []
         for split_index, name in enumerate(split_names):
             next_size = current_size[name] + len(indices)
@@ -125,41 +144,41 @@ def assign_groups(
             next_size_cost = (
                 (next_size - target_size[name]) / max(target_size[name], 1)
             ) ** 2
-            current_label_cost = sum(
-                (
-                    (current_labels[name][label] - target_labels[name][label])
-                    / max(target_labels[name][label], 1)
-                ) ** 2
-                for label in CEFR_LABELS
+            current_balance_cost = sum(
+                ((current[name][column][value] - target) / max(target, 1)) ** 2
+                for column in stratify_columns
+                for value, target in targets[name][column].items()
             )
-            next_label_cost = sum(
+            next_balance_cost = sum(
                 (
-                    (current_labels[name][label] + labels[label] - target_labels[name][label])
-                    / max(target_labels[name][label], 1)
+                    (current[name][column][value] + strata[column][value] - target)
+                    / max(target, 1)
                 ) ** 2
-                for label in CEFR_LABELS
+                for column in stratify_columns
+                for value, target in targets[name][column].items()
             )
             overflow = max(0.0, next_size - target_size[name]) / max(target_size[name], 1)
-            delta = next_size_cost - current_size_cost + next_label_cost - current_label_cost
+            delta = next_size_cost - current_size_cost + next_balance_cost - current_balance_cost
             candidates.append((delta + 4 * overflow**2, split_index, name))
         _, _, chosen = min(candidates)
         assigned[chosen].extend(indices)
         current_size[chosen] += len(indices)
-        current_labels[chosen].update(labels)
+        for column in stratify_columns:
+            current[chosen][column].update(strata[column])
     return assigned
 
 
 def verify_splits(frames: dict[str, pd.DataFrame]) -> dict:
     checks = {}
     for column in ["normalized_lemma", "group_id", "context_hash"]:
-        for left, right in [("train", "dev"), ("train", "test"), ("dev", "test")]:
+        for left, right in combinations(frames, 2):
             left_values = set(frames[left][column]) - {""}
             right_values = set(frames[right][column]) - {""}
             overlap = left_values & right_values
             checks[f"{column}_{left}_{right}_overlap"] = len(overlap)
             if overlap:
                 raise ValueError(f"{column} crosses {left}/{right}: {len(overlap)} values")
-    for left, right in [("train", "dev"), ("train", "test"), ("dev", "test")]:
+    for left, right in combinations(frames, 2):
         left_lemmas = set(frames[left]["normalized_lemma"])
         right_lemmas = set(frames[right]["normalized_lemma"])
         # ponytail: quadratic validation is fine for this 3.7k-row dataset; index if it grows.
@@ -178,6 +197,54 @@ def verify_splits(frames: dict[str, pd.DataFrame]) -> dict:
     return checks
 
 
+def resplit_development_pool(protocol, protocol_hash, output_dir):
+    """Reassign only verified parent train/dev groups; never open the sealed test."""
+    config = protocol["dataset"]
+    parent = PROJECT_ROOT / config["development_pool"]
+    manifest = json.loads((parent / "dataset-manifest.json").read_text())
+    parts, hashes = [], {}
+    for split in ("train", "dev"):
+        path = parent / f"{split}.csv"
+        hashes[split] = sha256_file(path)
+        if hashes[split] != config["parent_split_hashes"][split]:
+            raise ValueError(f"Parent {split} changed")
+        if hashes[split] != manifest["split_hashes"][split]:
+            raise ValueError(f"Parent {split} manifest mismatch")
+        parts.append(pd.read_csv(path, keep_default_na=False))
+    df = pd.concat(parts, ignore_index=True).sort_values("source_row_id").reset_index(drop=True)
+    if df["source_row_id"].duplicated().any():
+        raise ValueError("Parent source IDs are not unique")
+    groups = list(df.groupby("group_id", sort=True).indices.values())
+    assigned = assign_groups(
+        df, groups, config["proportions"], config["seed"], config["stratify_columns"]
+    )
+    frames = {name: df.loc[sorted(ids)].reset_index(drop=True) for name, ids in assigned.items()}
+    checks = verify_splits(frames)
+    if sum(map(len, frames.values())) != len(df):
+        raise ValueError("Development pool lost rows")
+    output_dir.mkdir(parents=True, exist_ok=False)
+    for name, frame in frames.items():
+        frame.to_csv(output_dir / f"{name}.csv", index=False)
+    result = {
+        "series_id": protocol["series"]["id"], "protocol_hash": protocol_hash,
+        "parent_split_hashes": hashes,
+        "sealed_test_sha256": manifest["split_hashes"]["test"],
+        "test_policy": "original test untouched; not opened or copied",
+        "evidence_scope": "new paired protocol on previously inspected development data",
+        "split_hashes": {name: sha256_file(output_dir / f"{name}.csv") for name in frames},
+        "counts": {name: len(frame) for name, frame in frames.items()},
+        "stratify_counts": {
+            name: {col: frame[col].astype(str).value_counts().to_dict()
+                   for col in config["stratify_columns"]}
+            for name, frame in frames.items()
+        },
+        "groups": len(groups), "checks": checks,
+    }
+    write_json(output_dir / "dataset-manifest.json", result)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "config/autoresearch.yaml")
@@ -185,6 +252,10 @@ def main() -> int:
     args = parser.parse_args()
     protocol, protocol_hash = load_protocol(args.config)
     config = protocol["dataset"]
+    if config.get("development_pool"):
+        return resplit_development_pool(
+            protocol, protocol_hash, args.output_dir or PROJECT_ROOT / config["output_dir"]
+        )
     if config.get("ambiguous_context_policy") != "target_only_for_multi_pos_multi_cefr":
         raise ValueError("Unsupported ambiguous-context policy")
     source = PROJECT_ROOT / config["source"]
@@ -279,7 +350,10 @@ def main() -> int:
     ]
 
     groups = group_rows(df)
-    assigned = assign_groups(df, groups, config["proportions"], int(config["seed"]))
+    stratify_columns = config.get("stratify_columns", ["cefr"])
+    assigned = assign_groups(
+        df, groups, config["proportions"], int(config["seed"]), stratify_columns
+    )
     root_by_index = {}
     for group_id, indices in enumerate(sorted(groups, key=lambda values: min(values))):
         for idx in indices:
@@ -330,6 +404,14 @@ def main() -> int:
         "counts": {name: len(frame) for name, frame in frames.items()},
         "class_counts": {
             name: frame["cefr"].value_counts().reindex(CEFR_LABELS, fill_value=0).to_dict()
+            for name, frame in frames.items()
+        },
+        "stratify_columns": stratify_columns,
+        "stratify_counts": {
+            name: {
+                column: frame[column].astype(str).value_counts().sort_index().to_dict()
+                for column in stratify_columns
+            }
             for name, frame in frames.items()
         },
         "exclusions": exclusions["reason"].value_counts().to_dict(),

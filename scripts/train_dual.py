@@ -77,7 +77,8 @@ KAZAKH_TOKEN_RE = re.compile(r"[а-яәғқңөұүһі]+", re.IGNORECASE)
 class DualDataset(torch.utils.data.Dataset):
     """Dataset for dual encoder."""
 
-    def __init__(self, df, tokenizer, char_vocab, feature_cols, max_char_len=30):
+    def __init__(self, df, tokenizer, char_vocab, feature_cols, max_char_len=30,
+                 context_file=None, seed=42):
         self.sentences = df['sentence'].tolist() if 'sentence' in df.columns else df['lemma'].tolist()
         self.targets = df['target'].tolist() if 'target' in df.columns else df['lemma'].tolist()
         self.lemmas = df['lemma'].astype(str).tolist()
@@ -90,6 +91,35 @@ class DualDataset(torch.utils.data.Dataset):
         self.tokenizer = tokenizer
         self.char_vocab = char_vocab
         self.max_char_len = max_char_len
+        self.context_bags = None
+        if context_file is not None:
+            contexts = json.loads(Path(context_file).read_text(encoding="utf-8"))
+            if not isinstance(contexts, dict) or any(
+                not isinstance(bag, list) or not bag
+                or any(not isinstance(s, str) or not s.strip() for s in bag)
+                for bag in contexts.values()
+            ):
+                raise ValueError("Training contexts require nonempty lists of sentences")
+            eligible = set(df.loc[df["context_available"], "normalized_lemma"])
+            if not set(contexts) <= eligible:
+                raise ValueError("Training contexts contain an ineligible or held-out lemma")
+            self.context_bags = [
+                contexts.get(lemma, [sentence]) if available else [sentence]
+                for lemma, sentence, available in zip(
+                    df["normalized_lemma"], self.sentences, df["context_available"]
+                )
+            ]
+            self.context_offsets = [
+                int(hashlib.sha256(f"{seed}:{lemma}".encode()).hexdigest()[:16], 16)
+                for lemma in df["normalized_lemma"]
+            ]
+
+    def set_epoch(self, epoch):
+        if self.context_bags is not None:
+            self.sentences = [
+                bag[(offset + epoch) % len(bag)]
+                for bag, offset in zip(self.context_bags, self.context_offsets)
+            ]
 
     def __len__(self):
         return len(self.sentences)
@@ -742,6 +772,8 @@ def main():
                         help="Explicit surface-form frequency JSON")
     parser.add_argument("--eval-context-file", type=Path, default=None,
                         help="Multi-context JSON used only for grouped dev evaluation")
+    parser.add_argument("--train-context-file", type=Path, default=None,
+                        help="Audited train-only contexts rotated once per epoch")
     parser.add_argument("--max-eval-contexts", type=int, default=10,
                         help="Maximum contexts averaged per dev row")
     parser.add_argument("--checkpoint-path", type=Path, default=None,
@@ -917,6 +949,8 @@ def main():
             PROJECT_ROOT, protocol=research_protocol, protocol_hash=protocol_hash
         )
     final_test_mode = args.final_test_manifest is not None
+    if args.train_context_file and (args.eval_only or final_test_mode or args.eval_context_file):
+        raise ValueError("Training context rotation is incompatible with evaluation-only modes")
     if args.eval_context_file and (not args.eval_only or final_test_mode):
         raise ValueError("Multi-context evaluation is dev-only and requires --eval-only")
     if final_test_mode:
@@ -1152,7 +1186,10 @@ def main():
     char_vocab = CharVocab()
 
     # Datasets
-    train_dataset = DualDataset(train_df, tokenizer, char_vocab, selected_feature_cols)
+    train_dataset = DualDataset(
+        train_df, tokenizer, char_vocab, selected_feature_cols,
+        context_file=args.train_context_file, seed=effective_seed,
+    )
     dev_dataset = DualDataset(dev_df, tokenizer, char_vocab, selected_feature_cols)
     robustness_dataset = (
         DualDataset(robustness_df, tokenizer, char_vocab, selected_feature_cols)
@@ -1251,6 +1288,17 @@ def main():
         dropout=dropout
     )
     tokenizer.resize_embeddings(model.context_encoder)
+    if research_protocol is not None and not (
+        tokenizer.model_name == model.context_encoder.model_name == transformer_model
+    ):
+        raise ValueError("Research model/tokenizer silently fell back from the declared model")
+    initial_state_hash = None
+    if research_protocol is not None:
+        digest = hashlib.sha256()
+        for name, tensor in model.state_dict().items():
+            digest.update(name.encode())
+            digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+        initial_state_hash = digest.hexdigest()
     model = model.to(device)
     if device == "cuda":
         torch.cuda.reset_peak_memory_stats()
@@ -1283,11 +1331,14 @@ def main():
     best_dev_f1 = 0
     patience_counter = 0
     patience = config.get("early_stopping_patience", 7)
+    train_span_failures = []
     if research_protocol is not None:
         patience = min(patience, research_protocol["evaluation"]["screening"]["patience"])
     if not args.eval_only:
         training_started = time.perf_counter()
         for epoch in range(epochs):
+            train_dataset.set_epoch(epoch)
+            tokenizer.reset_stats()
             train_loss = train_epoch(
                 model, train_loader, optimizer, scheduler, device,
                 class_weights=class_weights,
@@ -1300,6 +1351,7 @@ def main():
                 emd_weight=args.emd_weight,
                 r_drop_alpha=args.r_drop_alpha,
             )
+            train_span_failures.append(tokenizer.target_span_failure_count)
             dev_metrics, _, _ = evaluate(
                 model, dev_loader, device, use_ordinal=use_ordinal,
                 group_ids=dev_group_ids,
@@ -1315,7 +1367,8 @@ def main():
             if dev_metrics['macro_f1'] > best_dev_f1:
                 best_dev_f1 = dev_metrics['macro_f1']
                 patience_counter = 0
-                torch.save(model.state_dict(), model_dir / "best_model.pt")
+                torch.save(model.state_dict(), model_dir / "best_model.pt.tmp")
+                os.replace(model_dir / "best_model.pt.tmp", model_dir / "best_model.pt")
             else:
                 patience_counter += 1
                 if patience_counter >= patience:
@@ -1381,6 +1434,7 @@ def main():
             **context_mask_stats,
             **multi_context_stats,
             "data_dir": str(processed_dir),
+            "train_context_file": str(args.train_context_file) if args.train_context_file else None,
         },
     )
 
@@ -1488,6 +1542,7 @@ def main():
             seed=effective_seed,
             configuration={
                 "variant": args.variant, "pooling": args.pooling, "ordinal": args.ordinal,
+                "initial_state_sha256": initial_state_hash,
                 "ordinal_auxiliary": args.ordinal_auxiliary,
                 "ordinal_weight": args.ordinal_weight, "freeze_top_n": freeze_top_n,
                 "epochs": epochs, "batch_size": batch_size, "feature_selection": args.feature_selection,
@@ -1518,6 +1573,9 @@ def main():
                     sha256_file(args.surface_frequency_file) if args.surface_frequency_file else None
                 ),
                 **multi_context_stats,
+                "train_context_file": str(args.train_context_file) if args.train_context_file else None,
+                "train_context_sha256": sha256_file(args.train_context_file) if args.train_context_file else None,
+                "train_target_span_failures_per_epoch": train_span_failures,
                 "research_surface_changes": research_surface_changes(
                     PROJECT_ROOT, research_protocol
                 ),
