@@ -43,3 +43,9 @@ AGENTS.md
 CLAUDE.md
 CLAUDE.local.md
 GEMINI.md
+
+# Local document output and temporary files
+outputs/
+output/
+tmp/
+.pytest_cache/
